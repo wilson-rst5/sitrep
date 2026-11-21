@@ -47,7 +47,7 @@ services:
       SETUP_TOKEN: ${SETUP_TOKEN:?Run scripts/init-env.sh}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
       SECURE_COOKIES: ${SECURE_COOKIES:-false}
-      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings,ipma-observations,ipma-forecasts}
+      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings,ipma-observations,ipma-forecasts,nasa-eonet}
     depends_on:
       migrate: {condition: service_completed_successfully}
     healthcheck:
@@ -60,7 +60,7 @@ services:
     command: [python, -m, sitrep.worker, collector]
     environment:
       <<: *database-environment
-      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings,ipma-observations,ipma-forecasts}
+      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings,ipma-observations,ipma-forecasts,nasa-eonet}
     depends_on:
       migrate: {condition: service_completed_successfully}
       nats: {condition: service_healthy}

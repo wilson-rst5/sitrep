@@ -23,6 +23,7 @@ Web traffic binds to the loopback interface by default. See [deployment](docs/de
 | --- | --- | --- |
 | USGS GeoJSON | Worldwide | Live ingestion verified in local Compose |
 | IPMA warnings, station observations and daily forecasts | Portugal | Implemented |
+| NASA EONET | Worldwide | Implemented for open incidents with point locations |
 | OpenSky, TomTom, NASA FIRMS | Provider-specific | Planned, account or key requirements apply |
 | AIS-Catcher and local ADS-B | Receiver coverage | Planned, compatible hardware or authorised feed required |
 | Additional incident, news, environment and weather data | Provider-specific | Planned, subject to documented terms |

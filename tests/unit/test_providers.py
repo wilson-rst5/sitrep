@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from sitrep.providers import Event, ipma, ipma_forecasts, ipma_observations, usgs
+from sitrep.providers import Event, eonet, ipma, ipma_forecasts, ipma_observations, usgs
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -81,3 +81,23 @@ def test_ipma_daily_forecast_retains_calendar_day_and_azores_time_zone():
     assert first.forecast_date.isoformat() == "2026-01-01"
     assert first.description == "Low 10 °C · High 15 °C · Rain probability 30 %"
     assert second.occurred_at.day == 2 and third.occurred_at.day == 3
+
+
+def test_eonet_uses_latest_reported_point_and_excludes_closed_events():
+    wildfire = {
+        "id": "EONET_example", "title": "Test wildfire", "closed": None,
+        "categories": [{"id": "wildfires"}],
+        "geometry": [
+            {"date": "2025-12-30T00:00:00Z", "type": "Point", "coordinates": [-8.3, 39.1]},
+            {"date": "2025-12-31T00:00:00Z", "type": "Point", "coordinates": [-8.4, 39.2]},
+            {"date": "2026-01-01T00:00:00Z", "type": "Polygon", "coordinates": []},
+        ],
+    }
+    closed = {**wildfire, "id": "EONET_closed", "closed": "2026-01-01T00:00:00Z"}
+    event, = eonet({"events": [wildfire, closed]}, NOW)
+    assert event.external_id == "EONET_example"
+    assert event.category == "wildfire"
+    assert (event.longitude, event.latitude) == (-8.4, 39.2)
+    assert event.occurred_at.isoformat() == "2025-12-31T00:00:00+00:00"
+    assert event.severity == 1 and not event.official
+    assert str(event.source_url) == "https://eonet.gsfc.nasa.gov/api/v3/events/EONET_example"

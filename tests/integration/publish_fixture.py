@@ -30,6 +30,13 @@ async def main():
             severity=0, source_url="https://example.org/",
         )
         await stream.publish(SUBJECT, weather.model_dump_json().encode())
+        wildfire = Event(
+            provider="test-fixture", external_id="wildfire", category="wildfire",
+            title="SIMULATED TEST WILDFIRE", latitude=47.21, longitude=-123.19,
+            occurred_at=now, updated_at=now, expires_at=now + timedelta(hours=1),
+            severity=1, source_url="https://example.org/",
+        )
+        await stream.publish(SUBJECT, wildfire.model_dump_json().encode())
     finally:
         await connection.close()
 

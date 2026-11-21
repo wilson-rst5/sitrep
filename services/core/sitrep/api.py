@@ -194,6 +194,20 @@ def add_location(location: Location, user=Depends(require_admin)):
     return {"id": identifier}
 
 
+@api.post("/locations/{location_id}")
+def update_location(location_id: int, location: Location, user=Depends(require_admin)):
+    with engine.begin() as conn:
+        identifier = conn.execute(text("""
+            UPDATE locations SET name=:name, country=:country, latitude=:latitude, longitude=:longitude,
+                radius=:radius, timezone=:timezone, language=:language, units=:units, district=:district
+            WHERE id=:id RETURNING id
+        """), {"id": location_id, **location.model_dump()}).scalar()
+        if identifier is None:
+            raise HTTPException(404, "Monitoring area unavailable")
+        audit(conn, user["username"], "location_updated")
+    return {"id": identifier}
+
+
 @api.post("/accounts", status_code=201)
 def create_account(account: Account, user=Depends(require_admin)):
     with engine.begin() as conn:
@@ -388,6 +402,26 @@ def audit_log(_admin=Depends(require_admin)):
         return [dict(row) for row in conn.execute(text("""
             SELECT * FROM audit ORDER BY id DESC LIMIT 100
         """)).mappings()]
+
+
+@api.get("/related-events", response_model=list[Event])
+def related_events(provider: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_-]{0,49}$")],
+                   external_id: Annotated[str, Query(min_length=1, max_length=160)],
+                   _user=Depends(require_user)):
+    with engine.connect() as conn:
+        return list(conn.execute(text("""
+            SELECT other.payload
+            FROM events anchor JOIN events other ON (other.provider, other.external_id)
+                <> (anchor.provider, anchor.external_id)
+            WHERE anchor.provider=:provider AND anchor.external_id=:external_id
+                AND anchor.expires_at > now() AND other.expires_at > now()
+                AND other.occurred_at BETWEEN anchor.occurred_at - interval '24 hours'
+                    AND anchor.occurred_at + interval '24 hours'
+                AND (ST_DWithin(anchor.point, other.point, 50000)
+                    OR (anchor.point IS NULL AND other.point IS NULL AND anchor.district = other.district))
+            ORDER BY other.severity DESC, other.occurred_at DESC, other.provider, other.external_id
+            LIMIT 10
+        """), {"provider": provider, "external_id": external_id}).scalars())
 
 
 @api.get("/events/{provider}/{external_id}", response_model=Event)

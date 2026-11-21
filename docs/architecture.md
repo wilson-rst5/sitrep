@@ -6,4 +6,4 @@ The collector holds a database advisory lock per provider and records attempts b
 
 The browser receives authenticated revision signals and re-fetches filtered data. Polling continues as a fallback. Spatial searches use PostGIS geography. Official district warnings use an explicit provider district match and do not have synthetic points.
 
-An installation can scale API and storage consumers independently. Before placing services on multiple hosts, provision authenticated external database and broker instances, a TLS ingress and a migration job. The first schema has fixed per-event expiration. Additional telemetry tables, scoped provider configuration, alerting and intelligence remain planned.
+An installation can scale API and storage consumers independently. Before placing services on multiple hosts, provision authenticated external database and broker instances, a TLS ingress and a migration job. The collector assigns expiration per event. Category rules control alert eligibility, and account-specific acknowledgement snapshots are retained for 30 days. Related-event lookup uses PostGIS proximity or warning district matches and a 24-hour window.

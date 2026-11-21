@@ -6,8 +6,11 @@
 | [IPMA open data](https://api.ipma.pt/) | Yellow, orange and red district warnings, validity window and source description | 600 seconds | Public HTTPS. Local warning views require an applicable district code. |
 | [IPMA station observations](https://api.ipma.pt/) | Latest available station temperature, humidity, wind and hourly precipitation | 900 seconds | Public HTTPS |
 | [IPMA daily forecasts](https://api.ipma.pt/) | Three calendar days of low and high temperatures and precipitation probability for published localities | 1800 seconds | Public HTTPS |
+| [NASA EONET](https://eonet.gsfc.nasa.gov/docs/v3) | Recent open natural incidents and wildfires with reported point locations | 1800 seconds | Public HTTPS |
 
 USGS seismicity is displayed independently of tsunami alerts. IPMA warnings use district identifiers. Observations and forecasts use IPMA coordinates and appear as informational entries in the Weather view. Review the [IPMA terms](https://api.ipma.pt/) for use and attribution.
+
+EONET reports are approximate situational context. Event details link to the curated NASA records.
 
 OpenSky requires integration and terms validation for the intended use. NASA FIRMS, TomTom, EFFIS, Portuguese incident feeds, news, air quality, imagery, tides and infrastructure feeds have no production adapters in this build. AIS-Catcher and ADS-B receiver adapters remain planned.
 

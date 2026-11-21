@@ -27,6 +27,7 @@ const modes = ['normal', 'weather', 'emergency', 'aviation', 'maritime', 'traffi
 type Mode = typeof modes[number];
 const categories = {
   weather: ['weather_warning', 'weather_observation', 'weather_forecast'],
+  emergency: ['earthquake', 'weather_warning', 'wildfire', 'natural_incident'],
   aviation: ['aircraft'], maritime: ['vessel'], traffic: ['traffic'],
 };
 const unsupported = new Set<Mode>(['aviation', 'maritime', 'traffic']);
@@ -50,17 +51,23 @@ function locationInput(data: FormData): Omit<Location, 'id'> {
   };
 }
 
-function LocationFields() {
+function LocationFields({ location }: { location?: Location }) {
   return <div className="form-grid">
-    <label>Area name<input name="name" maxLength={120} required /></label>
-    <label>Country code<input name="country" pattern="[A-Za-z]{2}" placeholder="ISO two-letter code" required /></label>
-    <label>Latitude<input name="latitude" type="number" min="-90" max="90" step="any" required /></label>
-    <label>Longitude<input name="longitude" type="number" min="-180" max="180" step="any" required /></label>
-    <label>Radius (km)<input name="radius" type="number" min="1" max="2000" defaultValue="50" required /></label>
-    <label>Time zone<input name="timezone" defaultValue="UTC" maxLength={80} required /></label>
-    <label>Language<select name="language"><option value="en">English</option><option value="pt-PT">Português (Portugal)</option></select></label>
-    <label>Units<select name="units"><option value="metric">Metric</option><option value="imperial">Imperial</option></select></label>
-    <label>IPMA district code (optional)<input name="district" pattern="[A-Za-z]{3}" maxLength={3} /></label>
+    <label>Area name<input name="name" defaultValue={location?.name} maxLength={120} required /></label>
+    <label>Country code<input name="country" defaultValue={location?.country} pattern="[A-Za-z]{2}"
+      placeholder="ISO two-letter code" required /></label>
+    <label>Latitude<input name="latitude" defaultValue={location?.latitude} type="number" min="-90" max="90" step="any" required /></label>
+    <label>Longitude<input name="longitude" defaultValue={location?.longitude} type="number" min="-180" max="180" step="any" required /></label>
+    <label>Radius (km)<input name="radius" type="number" min="1" max="2000" defaultValue={location?.radius ?? 50} required /></label>
+    <label>Time zone<input name="timezone" defaultValue={location?.timezone ?? 'UTC'} maxLength={80} required /></label>
+    <label>Language<select name="language" defaultValue={location?.language ?? 'en'}>
+      <option value="en">English</option><option value="pt-PT">Português (Portugal)</option>
+    </select></label>
+    <label>Units<select name="units" defaultValue={location?.units ?? 'metric'}>
+      <option value="metric">Metric</option><option value="imperial">Imperial</option>
+    </select></label>
+    <label>IPMA district code (optional)<input name="district" defaultValue={location?.district ?? ''}
+      pattern="[A-Za-z]{3}" maxLength={3} /></label>
   </div>;
 }
 
@@ -136,6 +143,7 @@ function Dashboard({ user }: { user: User }) {
     const refresh = () => {
       void cache.invalidateQueries({ queryKey: ['events'] });
       void cache.invalidateQueries({ queryKey: ['alert-status'] });
+      void cache.invalidateQueries({ queryKey: ['related-events'] });
     };
     const signOut = () => { cache.clear(); window.location.assign('/'); };
     stream.addEventListener('events-changed', refresh);
@@ -148,11 +156,13 @@ function Dashboard({ user }: { user: User }) {
   const [layer, setLayer] = useState(true);
   const [selectedId, setSelected] = useState('');
   const [settings, setSettings] = useState(false);
+  const [editAreaId, setEditAreaId] = useState<number>();
   const [ruleCategory, setRuleCategory] = useState('earthquake');
   const [message, setMessage] = useState('');
   const [kiosk, setKiosk] = useState(new URLSearchParams(location.search).get('kiosk') === '1');
   const areas = useQuery({ queryKey: ['locations'], queryFn: () => api<Location[]>('/locations') });
   const area = areas.data?.find(item => item.id === areaId) ?? areas.data?.[0];
+  const editedArea = areas.data?.find(item => item.id === editAreaId);
   const dictionary = labels[area?.language ?? 'en'];
   const global = mode === 'global';
   const modeCategories = mode in categories ? categories[mode as keyof typeof categories] : [];
@@ -166,13 +176,18 @@ function Dashboard({ user }: { user: User }) {
     refetchInterval: 60000 });
   const items = events.data ?? empty;
   const selected = items.find(item => incidentKey(item) === selectedId);
+  const eventLookup = selected && new URLSearchParams({ provider: selected.provider, external_id: selected.external_id });
   const alertStatus = useQuery({
-    queryKey: ['alert-status', selected?.provider, selected?.external_id],
+    queryKey: ['alert-status', eventLookup?.toString()],
     enabled: !!selected,
     refetchInterval: 30000,
-    queryFn: () => api<{ eligible: boolean; acknowledged_at: string | null }>(
-      '/alerts/status?' + new URLSearchParams({ provider: selected!.provider, external_id: selected!.external_id }),
-    ),
+    queryFn: () => api<{ eligible: boolean; acknowledged_at: string | null }>('/alerts/status?' + eventLookup),
+  });
+  const related = useQuery({
+    queryKey: ['related-events', eventLookup?.toString()],
+    enabled: !!selected,
+    refetchInterval: 30000,
+    queryFn: () => api<Incident[]>('/related-events?' + eventLookup),
   });
   const rules = useQuery({ queryKey: ['alert-rules'], enabled: settings && user.role === 'admin',
     queryFn: () => api<AlertRule[]>('/alert-rules') });
@@ -218,12 +233,18 @@ function Dashboard({ user }: { user: User }) {
     dateStyle: 'medium', timeStyle: 'short', timeZone: area?.timezone ?? 'UTC',
   }).format(new Date(value));
 
-  async function addArea(event: FormEvent<HTMLFormElement>) {
+  async function saveArea(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage('');
     try {
-      const { id } = await api<{ id: number }>('/locations', locationInput(new FormData(event.currentTarget)));
-      await cache.invalidateQueries({ queryKey: ['locations'] });
+      const path = editedArea ? '/locations/' + editedArea.id : '/locations';
+      const { id } = await api<{ id: number }>(path, locationInput(new FormData(event.currentTarget)));
+      await Promise.all([
+        cache.invalidateQueries({ queryKey: ['locations'] }),
+        cache.invalidateQueries({ queryKey: ['events'] }),
+      ]);
+      setSelected('');
+      setEditAreaId(undefined);
       setArea(id);
       setSettings(false);
     } catch (reason) { setMessage(String(reason)); }
@@ -268,7 +289,16 @@ function Dashboard({ user }: { user: User }) {
       <div className="panel-heading"><h2>{dictionary.settings}</h2><button onClick={signOut}>{dictionary.signout}</button></div>
       <p>{user.username} · {user.role}</p>
       {user.role === 'admin' && <>
-        <form onSubmit={addArea}><LocationFields /><button className="primary-button">Add monitoring area</button></form>
+        <form onSubmit={saveArea}>
+          <h3>Monitoring areas</h3>
+          <label>Area to manage<select value={editAreaId ?? ''}
+            onChange={event => setEditAreaId(event.target.value ? Number(event.target.value) : undefined)}>
+            <option value="">New monitoring area</option>
+            {areas.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select></label>
+          <LocationFields key={editedArea?.id ?? 'new'} location={editedArea} />
+          <button className="primary-button">{editedArea ? 'Save monitoring area' : 'Add monitoring area'}</button>
+        </form>
         <form onSubmit={createViewer}>
           <h3>Create viewer account</h3>
           <div className="form-grid">
@@ -283,6 +313,8 @@ function Dashboard({ user }: { user: User }) {
             <label>Event category<select value={ruleCategory} onChange={event => setRuleCategory(event.target.value)}>
               <option value="earthquake">Earthquakes</option>
               <option value="weather_warning">Weather warnings</option>
+              <option value="wildfire">Wildfires</option>
+              <option value="natural_incident">Natural incidents</option>
             </select></label>
             <label>Minimum alert priority<select name="threshold" key={ruleCategory + ':' + ruleThreshold}
               defaultValue={ruleThreshold} disabled={!rules.isSuccess}>
@@ -346,6 +378,13 @@ function Dashboard({ user }: { user: User }) {
             <a href={selected.source_url} target="_blank" rel="noreferrer">Source · {selected.provider}</a>
             {alertStatus.data?.acknowledged_at ? <p>Acknowledged · {date(alertStatus.data.acknowledged_at)}</p> :
               alertStatus.data?.eligible && <button onClick={() => void acknowledge(selected)}>Acknowledge alert</button>}
+            {!!related.data?.length && <>
+              <h4>Related events</h4>
+              <p className="muted">Events within 24 hours and 50 km, or in the same warning district.</p>
+              <ul>{related.data.map(item => <li key={incidentKey(item)}>
+                <a href={item.source_url} target="_blank" rel="noreferrer">{item.title}</a>
+              </li>)}</ul>
+            </>}
           </div> : <p className="empty">{dictionary.select}</p>}
         </section>
         <section className="panel">

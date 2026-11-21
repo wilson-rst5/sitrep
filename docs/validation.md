@@ -1,13 +1,16 @@
 # Validation
 
-The public source is on the `main` branch of [SITREP on GitHub](https://github.com/wilson-rst5/sitrep). GitHub Actions runs lint, dependency audits, provider tests, a Compose and Chromium smoke test, and a Git history secret scan. Release tags repeat those checks before publishing images to GHCR. The [main CI run](https://github.com/wilson-rst5/sitrep/actions/runs/44947796731) and the [release workflow for 0.1.0-rc.1](https://github.com/wilson-rst5/sitrep/actions/runs/44947797092) passed.
+The public source is on the `main` branch of [SITREP on GitHub](https://github.com/wilson-rst5/sitrep). GitHub Actions runs lint, dependency audits, provider tests, a Compose and Chromium smoke test, and a Git history secret scan. Release tags repeat those checks before publishing images to GHCR. See [GitHub Actions](https://github.com/wilson-rst5/sitrep/actions) for results by commit and release tag.
 
 | Check | Coverage |
 | --- | --- |
 | Docker Compose | Builds the core and web images, starts PostGIS and NATS JetStream, applies the Alembic migration, and waits for the API and web health checks. |
 | Published images | Pulled both Linux amd64 images anonymously and started the production Compose configuration in an isolated project. The API returned `ready` through the web proxy. |
-| Ingestion and dashboard | Sends duplicate near and far event fixtures through JetStream. Chromium verifies administrator bootstrap, sign-in, local and global filtering, acknowledgement, kiosk mode, and mobile layout. |
-| Provider normalization | Three pytest cases cover USGS and IPMA fixture data and event validation. |
+| Ingestion and dashboard | Sends duplicate near and far event fixtures through JetStream. Chromium verifies administrator bootstrap, sign-in, filtering, alert rules and history, related events, monitoring-area edits, viewer permissions, kiosk mode and mobile layout. |
+| Provider normalization | Six pytest cases cover USGS, IPMA and NASA EONET fixture data and event validation. |
+| Database upgrade | Applied the alert migration to a database with an existing acknowledgement, verified snapshot backfill, and deleted the original test event to verify independent history retention. |
+| Kiosk smoke soak | An isolated Chromium session stayed responsive and showed a stable event count for three minutes over six refresh intervals. |
+| Application licence inventory | Checked declared npm lockfile and installed Python package licences. Container base-image packages and data redistribution terms require separate review. |
 | Publication review | Gitleaks scans the publication files and public Git history. Environment files, local deployment overrides and private workspace data are ignored. |
 
-The automated browser test uses simulated events with live providers disabled. A separate local Compose run fetched live USGS and IPMA data, persisted both feeds, and displayed a live USGS earthquake in the authenticated dashboard. Extended kiosk operation and production deployment remain open in the [roadmap](roadmap.md).
+The automated browser test uses simulated events with live providers disabled. A separate local Compose run fetched live USGS and IPMA data, persisted both feeds, and displayed a live USGS earthquake in the authenticated dashboard. The new IPMA observation and forecast adapters also normalized live responses. Deployment on the intended production host remains open in the [roadmap](roadmap.md).

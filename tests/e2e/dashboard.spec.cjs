@@ -23,6 +23,9 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await expect(page.getByText('SIMULATED TEST EVENT (far)')).toHaveCount(0);
   await nearEvent.click();
   await expect(page.getByRole('link', { name: 'Source · test-fixture' })).toHaveAttribute('href', 'https://example.org/');
+  await expect(page.getByRole('heading', { name: 'Related events' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'SIMULATED TEST WEATHER' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'SIMULATED TEST EVENT (far)' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Acknowledge alert' })).toBeVisible();
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Minimum alert priority').selectOption('3');
@@ -35,15 +38,40 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await expect(page.getByText(/Acknowledged ·/)).toBeVisible();
   const settings = page.locator('section.settings');
   await expect(settings.getByText(/SIMULATED TEST EVENT \(near\)/)).toBeVisible();
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Area to manage').selectOption({ label: 'Test area' });
+  await expect(page.getByLabel('Area name')).toHaveValue('Test area');
+  await page.getByLabel('Area name').fill('Updated test area');
+  await page.getByRole('button', { name: 'Save monitoring area' }).click();
+  await expect(settings).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'Updated test area' })).toBeAttached();
   await page.getByRole('button', { name: 'Global' }).click();
   await expect(page.getByRole('button', { name: 'Global' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('SIMULATED TEST EVENT (far)')).toHaveCount(1);
   await page.getByRole('button', { name: 'Weather', exact: true }).click();
   await expect(page.getByRole('button', { name: /SIMULATED TEST WEATHER/ })).toBeVisible();
   await expect(nearEvent).toHaveCount(0);
+  await page.getByRole('button', { name: 'Emergency', exact: true }).click();
+  await expect(page.getByRole('button', { name: /SIMULATED TEST WILDFIRE/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /SIMULATED TEST WEATHER/ })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('heading', { name: 'Operational map' })).toBeVisible();
   await expect(page.locator('body')).toHaveCSS('overflow-x', 'visible');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+  const headers = { Origin: new URL(page.url()).origin };
+  const viewer = { username: 'test-viewer', password: 'synthetic-viewer-password' };
+  const created = await page.request.post('/api/v1/accounts', { data: viewer, headers });
+  expect(created.status()).toBe(201);
+  const signedIn = await page.request.post('/api/v1/login', { data: viewer, headers });
+  expect(signedIn.status()).toBe(200);
+  const locations = await page.request.get('/api/v1/locations');
+  const [location] = await locations.json();
+  const update = await page.request.post('/api/v1/locations/' + location.id, { data: location, headers });
+  expect(update.status()).toBe(403);
+  const rule = await page.request.post('/api/v1/alert-rules', {
+    data: { category: 'earthquake', minimum_severity: 4 }, headers,
+  });
+  expect(rule.status()).toBe(403);
+  const history = await page.request.get('/api/v1/alerts/history');
+  expect(await history.json()).toEqual([]);
 });

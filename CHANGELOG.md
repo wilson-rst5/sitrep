@@ -1,9 +1,11 @@
 # Changelog
 
-## Next
+## 0.1.0-rc.2
 
 - Added configurable alert thresholds and 30-day acknowledgement history.
 - Added IPMA station observations and three-day forecasts to the Weather view.
+- Added administrator editing of monitoring areas and related-event lookup.
+- Added NASA EONET wildfire and natural incident reports to the Emergency view.
 
 ## 0.1.0-rc.1
 

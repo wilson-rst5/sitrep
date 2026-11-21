@@ -1,6 +1,7 @@
 """Provider contracts and deterministic transformations. No arbitrary feed URLs."""
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from math import isfinite
@@ -187,6 +188,38 @@ def ipma_forecasts(documents, fetched_at):
             )
 
 
+EONET_ROOT = "https://eonet.gsfc.nasa.gov"
+EONET_EVENTS = EONET_ROOT + "/api/v3/events"
+
+
+def eonet(document, fetched_at):
+    if not isinstance(document, dict) or not isinstance(document.get("events"), list):
+        raise ValueError("Invalid NASA EONET event collection")
+    for row in document["events"]:
+        identifier = row["id"]
+        if row.get("closed") or not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", identifier):
+            continue
+        points = [
+            (utc_timestamp(geometry["date"]), geometry["coordinates"])
+            for geometry in row["geometry"]
+            if geometry["type"] == "Point"
+        ]
+        if not points:
+            continue
+        observed, (longitude, latitude) = max(points, key=lambda point: point[0])
+        if observed > fetched_at:
+            continue
+        wildfire = any(category["id"] == "wildfires" for category in row["categories"])
+        yield Event(
+            provider="nasa-eonet", external_id=identifier,
+            category="wildfire" if wildfire else "natural_incident",
+            title=row["title"], description=row.get("description") or "",
+            occurred_at=observed, updated_at=fetched_at, expires_at=fetched_at + timedelta(hours=2),
+            latitude=latitude, longitude=longitude, severity=1,
+            source_url=f"{EONET_EVENTS}/{identifier}",
+        )
+
+
 @dataclass(frozen=True)
 class Provider:
     id: str
@@ -214,6 +247,9 @@ PROVIDERS = (
     Provider("ipma-forecasts", "IPMA daily forecasts", IPMA_URL,
              FORECAST_URLS[0], "weather_forecast", "Portugal", 1800, ipma_forecasts, IPMA_URL,
              additional_urls=(*FORECAST_URLS[1:], IPMA_DATA + "distrits-islands.json")),
+    Provider("nasa-eonet", "NASA EONET", EONET_ROOT + "/docs/v3",
+             EONET_EVENTS + "?status=open&days=30&category=wildfires,volcanoes,floods,landslides,severeStorms",
+             "natural_incident", "Worldwide", 1800, eonet, EONET_ROOT + "/what-is-eonet"),
 )
 
 DEFAULT_PROVIDERS = ",".join(provider.id for provider in PROVIDERS)

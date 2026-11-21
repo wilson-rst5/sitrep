@@ -10,9 +10,12 @@
 - [x] Verify live USGS and IPMA ingestion and display a live USGS earthquake in the dashboard
 - [x] Add IPMA station observations and three-day forecasts
 - [ ] Add a permitted news feed and OpenSky aviation
-- [ ] Add incident, traffic, wildfire, air quality, maritime and imagery sources as permitted
+- [x] Add NASA EONET wildfire and natural incident reports
+- [ ] Add traffic, air quality, maritime and imagery sources as permitted
 - [x] Add category-specific alert thresholds and per-user acknowledgement history
-- [ ] Add event correlation and richer setup and administration
-- [ ] Measure prolonged kiosk performance and complete dependency, licence and secret audits
+- [x] Add related-event lookup and administrator editing of monitoring areas
+- [x] Run application dependency and secret scans and inventory application dependency licences
+- [ ] Measure prolonged kiosk performance on the target display hardware
+- [ ] Review base-image package licences and validate deployment on the target host
 - [x] Publish public GitHub repository
 - [x] Publish GHCR images after the release gates pass

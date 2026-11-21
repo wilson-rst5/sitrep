@@ -2,9 +2,9 @@
 
 Use Docker Engine, the Compose plugin and OpenSSL. Run `./scripts/init-env.sh` and `docker compose up --build --wait`. The bootstrap token is in the ignored `.env` file. The setup endpoint closes after the first administrator is committed. Retain the database password securely.
 
-## Weather feeds
+## Additional public feeds
 
-New installations enable the two IPMA weather feeds by default. To enable them on an existing installation, add `ipma-observations,ipma-forecasts` to the existing comma-separated `ENABLED_PROVIDERS` value in the ignored `.env` file and recreate the services. Each installation retains its configured list of enabled providers.
+New installations enable the two IPMA weather feeds by default. To enable them on an existing installation, add `ipma-observations,ipma-forecasts` to the existing comma-separated `ENABLED_PROVIDERS` value in the ignored `.env` file and recreate the services. Add `nasa-eonet` to enable the natural incident feed on existing installations. Each installation retains its configured list of enabled providers.
 
 ## Local display, LAN and HTTPS
 
@@ -34,11 +34,11 @@ For restore, use an isolated database and `pg_restore --exit-on-error` with the 
 
 ## Prebuilt images
 
-The [0.1.0 release candidate](https://github.com/wilson-rst5/sitrep/releases/tag/v0.1.0-rc.1) publishes Linux amd64 images. Add these settings to the generated `.env` on the Docker host, replacing the example origin with your HTTPS origin.
+The [0.1.0 release candidate](https://github.com/wilson-rst5/sitrep/releases/tag/v0.1.0-rc.2) publishes Linux amd64 images. Add these settings to the generated `.env` on the Docker host, replacing the example origin with your HTTPS origin.
 
 ```dotenv
-SITREP_CORE_IMAGE=ghcr.io/wilson-rst5/sitrep-core:0.1.0-rc.1
-SITREP_WEB_IMAGE=ghcr.io/wilson-rst5/sitrep-web:0.1.0-rc.1
+SITREP_CORE_IMAGE=ghcr.io/wilson-rst5/sitrep-core:0.1.0-rc.2
+SITREP_WEB_IMAGE=ghcr.io/wilson-rst5/sitrep-web:0.1.0-rc.2
 SITREP_HTTPS_ORIGIN=https://sitrep.example.org
 ```
 
