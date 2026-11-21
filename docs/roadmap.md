@@ -8,9 +8,11 @@
 - [x] Build and start containers, run migrations and verify health
 - [x] Run provider, broker, API and browser tests with fixtures
 - [x] Verify live USGS and IPMA ingestion and display a live USGS earthquake in the dashboard
-- [ ] Add IPMA weather observations and forecasts, a permitted news feed and OpenSky aviation
+- [x] Add IPMA station observations and three-day forecasts
+- [ ] Add a permitted news feed and OpenSky aviation
 - [ ] Add incident, traffic, wildfire, air quality, maritime and imagery sources as permitted
-- [ ] Add monitoring rules, correlation, alert history, richer setup and administration
+- [x] Add category-specific alert thresholds and per-user acknowledgement history
+- [ ] Add event correlation and richer setup and administration
 - [ ] Measure prolonged kiosk performance and complete dependency, licence and secret audits
 - [x] Publish public GitHub repository
 - [x] Publish GHCR images after the release gates pass

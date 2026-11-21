@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from .db import engine, ready
-from .providers import PROVIDERS, Event
+from .providers import DEFAULT_PROVIDERS, PROVIDERS, Event
 
 passwords = PasswordHasher()
 cookie_secure = os.getenv("SECURE_COOKIES", "true") == "true"
@@ -213,7 +213,7 @@ def create_account(account: Account, user=Depends(require_admin)):
 def providers(_user=Depends(require_user)):
     with engine.connect() as conn:
         health_rows = {row.provider: row for row in conn.execute(text("SELECT * FROM provider_health"))}
-    enabled = set(os.getenv("ENABLED_PROVIDERS", "usgs,ipma-warnings").split(","))
+    enabled = set(os.getenv("ENABLED_PROVIDERS", DEFAULT_PROVIDERS).split(","))
     result = []
     for provider in PROVIDERS:
         row = health_rows.get(provider.id)
@@ -234,7 +234,8 @@ def providers(_user=Depends(require_user)):
 
 @api.get("/events", response_model=list[Event])
 def events(location_id: Annotated[int | None, Query(ge=1)] = None,
-           category: Annotated[str | None, Query(max_length=40)] = None,
+           category: Annotated[list[Annotated[str, Field(min_length=1, max_length=40)]] | None,
+                               Query(max_length=12)] = None,
            severity: Annotated[int, Query(ge=0, le=4)] = 0,
            limit: Annotated[int, Query(ge=1, le=500)] = 200,
            offset: Annotated[int, Query(ge=0, le=10000)] = 0,
@@ -247,7 +248,7 @@ def events(location_id: Annotated[int | None, Query(ge=1)] = None,
             if location is None:
                 raise HTTPException(404, "Monitoring area unavailable")
         criteria = ""
-        params = dict(category=category or "", severity=severity, limit=limit, offset=offset)
+        params = dict(categories=category or [], all_categories=not category, severity=severity, limit=limit, offset=offset)
         if location is not None:
             criteria = """AND (
                 ST_DWithin(point, ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography,:meters)
@@ -258,7 +259,7 @@ def events(location_id: Annotated[int | None, Query(ge=1)] = None,
                           country=location.country)
         return list(conn.execute(text(f"""
             SELECT payload FROM events WHERE expires_at > now() AND severity >= :severity
-            AND (:category = '' OR category = :category) {criteria}
+            AND (:all_categories OR category = ANY(CAST(:categories AS text[]))) {criteria}
             ORDER BY severity DESC, occurred_at DESC, provider, external_id LIMIT :limit OFFSET :offset
         """), params).scalars())
 
@@ -300,36 +301,84 @@ class AlertAck(BaseModel):
     external_id: str = Field(min_length=1, max_length=160)
 
 
+class AlertRule(BaseModel):
+    category: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    minimum_severity: int = Field(ge=1, le=4)
+
+
+@api.get("/alert-rules", response_model=list[AlertRule])
+def alert_rules(_user=Depends(require_user)):
+    with engine.connect() as conn:
+        return conn.execute(text("SELECT * FROM alert_rules ORDER BY category")).mappings().all()
+
+
+@api.post("/alert-rules", response_model=AlertRule)
+def save_alert_rule(rule: AlertRule, user=Depends(require_admin)):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO alert_rules (category, minimum_severity) VALUES (:category, :minimum_severity)
+            ON CONFLICT (category) DO UPDATE SET minimum_severity = EXCLUDED.minimum_severity
+        """), rule.model_dump())
+        audit(conn, user["username"], "alert_rule_saved")
+    return rule
+
+
 @api.get("/alerts")
 def alerts(user=Depends(require_user)):
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT e.payload, a.acknowledged_at FROM events e
+            LEFT JOIN alert_rules r ON r.category = e.category
             LEFT JOIN alert_acknowledgements a
                 ON a.provider=e.provider AND a.external_id=e.external_id AND a.username=:username
-            WHERE e.severity >= 2 AND e.expires_at > now()
+            WHERE e.severity >= COALESCE(r.minimum_severity, 2) AND e.expires_at > now()
             ORDER BY e.severity DESC, e.occurred_at DESC, e.provider, e.external_id LIMIT 200
         """), user).mappings()
         return [dict(event=row.payload, acknowledged_at=row.acknowledged_at) for row in rows]
+
+
+@api.get("/alerts/history")
+def alert_history(user=Depends(require_user)):
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT event_snapshot AS event, acknowledged_at FROM alert_acknowledgements
+            WHERE username=:username AND acknowledged_at > now() - interval '30 days'
+            ORDER BY acknowledged_at DESC, provider, external_id LIMIT 200
+        """), user).mappings()
+        return [dict(row) for row in rows]
+
+
+@api.get("/alerts/status")
+def alert_status(provider: str, external_id: str, user=Depends(require_user)):
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT e.severity >= COALESCE(r.minimum_severity, 2) AS eligible, a.acknowledged_at
+            FROM events e LEFT JOIN alert_rules r ON r.category = e.category
+            LEFT JOIN alert_acknowledgements a
+                ON a.provider=e.provider AND a.external_id=e.external_id AND a.username=:username
+            WHERE e.provider=:provider AND e.external_id=:external_id AND e.expires_at > now()
+        """), {"provider": provider, "external_id": external_id, "username": user["username"]}).mappings().first()
+    if row is None:
+        raise HTTPException(404, "Alert unavailable")
+    return dict(row)
 
 
 @api.post("/alerts/acknowledge")
 def acknowledge(alert: AlertAck, user=Depends(require_user)):
     with engine.begin() as conn:
         params = {**alert.model_dump(), "username": user["username"]}
-        exists = conn.execute(text("""
-            SELECT 1 FROM events WHERE provider=:provider AND external_id=:external_id
-                AND severity >= 2 AND expires_at > now() FOR KEY SHARE
-        """), params).scalar()
-        if not exists:
-            raise HTTPException(404, "Alert unavailable")
         acknowledged = conn.execute(text("""
-            INSERT INTO alert_acknowledgements (username, provider, external_id)
-            VALUES (:username,:provider,:external_id)
+            INSERT INTO alert_acknowledgements (username, provider, external_id, event_snapshot)
+            SELECT :username, e.provider, e.external_id, e.payload
+            FROM events e LEFT JOIN alert_rules r ON r.category = e.category
+            WHERE e.provider=:provider AND e.external_id=:external_id
+                AND e.severity >= COALESCE(r.minimum_severity, 2) AND e.expires_at > now()
             ON CONFLICT (username, provider, external_id) DO UPDATE
             SET acknowledged_at=alert_acknowledgements.acknowledged_at
             RETURNING acknowledged_at
-        """), params).scalar_one()
+        """), params).scalar()
+        if acknowledged is None:
+            raise HTTPException(404, "Alert unavailable")
     return {"acknowledged_at": acknowledged}
 
 

@@ -9,7 +9,7 @@ export type Incident = {
   description: string; occurred_at: string; updated_at: string; expires_at: string;
   latitude: number | null; longitude: number | null; severity: number;
   official: boolean; district: string | null; source_url: string;
-  magnitude: number | null; depth_km: number | null;
+  magnitude: number | null; depth_km: number | null; forecast_date: string | null;
 };
 
 export type Provider = {

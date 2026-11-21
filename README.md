@@ -1,6 +1,6 @@
 # SITREP
 
-SITREP is a self-hosted civilian situation awareness dashboard. The initial implementation displays attributed earthquake reports and Portuguese district weather warnings, with an interactive map, local and global views, provider freshness, and a kiosk layout.
+SITREP is a self-hosted civilian situation awareness dashboard. The initial implementation displays attributed earthquake reports and Portuguese district weather warnings, station observations, and daily forecasts, with an interactive map, local and global views, provider freshness, and a kiosk layout.
 
 SITREP is an early development build. Use official channels for emergency instructions. See the [verification record](docs/validation.md) for deployment and test status.
 
@@ -22,7 +22,7 @@ Web traffic binds to the loopback interface by default. See [deployment](docs/de
 | Provider | Coverage | Implementation |
 | --- | --- | --- |
 | USGS GeoJSON | Worldwide | Live ingestion verified in local Compose |
-| IPMA warnings | Portugal | Live ingestion verified in local Compose |
+| IPMA warnings, station observations and daily forecasts | Portugal | Implemented |
 | OpenSky, TomTom, NASA FIRMS | Provider-specific | Planned, account or key requirements apply |
 | AIS-Catcher and local ADS-B | Receiver coverage | Planned, compatible hardware or authorised feed required |
 | Additional incident, news, environment and weather data | Provider-specific | Planned, subject to documented terms |

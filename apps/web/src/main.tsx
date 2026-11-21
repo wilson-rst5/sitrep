@@ -25,10 +25,15 @@ const labels = {
 };
 const modes = ['normal', 'weather', 'emergency', 'aviation', 'maritime', 'traffic', 'global'] as const;
 type Mode = typeof modes[number];
-const categories = { weather: 'weather_warning', aviation: 'aircraft', maritime: 'vessel', traffic: 'traffic' };
+const categories = {
+  weather: ['weather_warning', 'weather_observation', 'weather_forecast'],
+  aviation: ['aircraft'], maritime: ['vessel'], traffic: ['traffic'],
+};
 const unsupported = new Set<Mode>(['aviation', 'maritime', 'traffic']);
 const severity = ['Information', 'Routine', 'Important', 'High', 'Critical'];
 const empty: Incident[] = [];
+type AlertRule = { category: string; minimum_severity: number };
+type AlertHistory = { event: Incident; acknowledged_at: string };
 
 function Brand() {
   return <a className="brand" href="/" aria-label="SITREP home"><span className="brand-mark" aria-hidden="true">⌖</span>SITREP</a>;
@@ -128,7 +133,10 @@ function Dashboard({ user }: { user: User }) {
   const cache = useQueryClient();
   useEffect(() => {
     const stream = new EventSource('/api/v1/stream');
-    const refresh = () => void cache.invalidateQueries({ queryKey: ['events'] });
+    const refresh = () => {
+      void cache.invalidateQueries({ queryKey: ['events'] });
+      void cache.invalidateQueries({ queryKey: ['alert-status'] });
+    };
     const signOut = () => { cache.clear(); window.location.assign('/'); };
     stream.addEventListener('events-changed', refresh);
     stream.addEventListener('signed-out', signOut);
@@ -140,16 +148,17 @@ function Dashboard({ user }: { user: User }) {
   const [layer, setLayer] = useState(true);
   const [selectedId, setSelected] = useState('');
   const [settings, setSettings] = useState(false);
+  const [ruleCategory, setRuleCategory] = useState('earthquake');
   const [message, setMessage] = useState('');
   const [kiosk, setKiosk] = useState(new URLSearchParams(location.search).get('kiosk') === '1');
   const areas = useQuery({ queryKey: ['locations'], queryFn: () => api<Location[]>('/locations') });
   const area = areas.data?.find(item => item.id === areaId) ?? areas.data?.[0];
   const dictionary = labels[area?.language ?? 'en'];
   const global = mode === 'global';
-  const category = mode in categories ? categories[mode as keyof typeof categories] : undefined;
+  const modeCategories = mode in categories ? categories[mode as keyof typeof categories] : [];
   const query = new URLSearchParams({ severity: String(minimum), limit: '500' });
   if (area && !global) query.set('location_id', String(area.id));
-  if (category) query.set('category', category);
+  for (const category of modeCategories) query.append('category', category);
   const events = useQuery({ queryKey: ['events', query.toString()], enabled: !!area || global,
     queryFn: () => api<Incident[]>('/events?' + query),
     refetchInterval: 30000 });
@@ -157,14 +166,40 @@ function Dashboard({ user }: { user: User }) {
     refetchInterval: 60000 });
   const items = events.data ?? empty;
   const selected = items.find(item => incidentKey(item) === selectedId);
-  const alerts = useQuery({ queryKey: ['alerts'], enabled: (selected?.severity ?? 0) >= 2,
-    queryFn: () => api<{ event: Incident; acknowledged_at: string | null }[]>('/alerts') });
-  const acknowledged = alerts.data?.find(entry => incidentKey(entry.event) === selectedId)?.acknowledged_at;
+  const alertStatus = useQuery({
+    queryKey: ['alert-status', selected?.provider, selected?.external_id],
+    enabled: !!selected,
+    refetchInterval: 30000,
+    queryFn: () => api<{ eligible: boolean; acknowledged_at: string | null }>(
+      '/alerts/status?' + new URLSearchParams({ provider: selected!.provider, external_id: selected!.external_id }),
+    ),
+  });
+  const rules = useQuery({ queryKey: ['alert-rules'], enabled: settings && user.role === 'admin',
+    queryFn: () => api<AlertRule[]>('/alert-rules') });
+  const history = useQuery({ queryKey: ['alert-history'], enabled: settings,
+    queryFn: () => api<AlertHistory[]>('/alerts/history') });
+  const ruleThreshold = rules.data?.find(rule => rule.category === ruleCategory)?.minimum_severity ?? 2;
 
   async function acknowledge(event: Incident) {
     try {
       await api('/alerts/acknowledge', { provider: event.provider, external_id: event.external_id });
-      await cache.invalidateQueries({ queryKey: ['alerts'] });
+      await Promise.all([
+        cache.invalidateQueries({ queryKey: ['alert-status'] }),
+        cache.invalidateQueries({ queryKey: ['alert-history'] }),
+      ]);
+    } catch (reason) { setMessage(String(reason)); }
+  }
+
+  async function saveRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    try {
+      await api('/alert-rules', { category: ruleCategory, minimum_severity: Number(fields.get('threshold')) });
+      await Promise.all([
+        cache.invalidateQueries({ queryKey: ['alert-rules'] }),
+        cache.invalidateQueries({ queryKey: ['alert-status'] }),
+      ]);
+      setMessage('Alert rule saved.');
     } catch (reason) { setMessage(String(reason)); }
   }
 
@@ -242,7 +277,29 @@ function Dashboard({ user }: { user: User }) {
           </div>
           <button className="primary-button">Create viewer</button>
         </form>
+        <form onSubmit={saveRule}>
+          <h3>Alert rules</h3>
+          <div className="form-grid">
+            <label>Event category<select value={ruleCategory} onChange={event => setRuleCategory(event.target.value)}>
+              <option value="earthquake">Earthquakes</option>
+              <option value="weather_warning">Weather warnings</option>
+            </select></label>
+            <label>Minimum alert priority<select name="threshold" key={ruleCategory + ':' + ruleThreshold}
+              defaultValue={ruleThreshold} disabled={!rules.isSuccess}>
+              {severity.slice(1).map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
+            </select></label>
+          </div>
+          <button className="primary-button" disabled={!rules.isSuccess}>Save alert rule</button>
+          {rules.isError && <p role="status">Alert rules could not be loaded.</p>}
+        </form>
       </>}
+      <h3>Alert acknowledgement history</h3>
+      {history.isError ? <p role="status">Alert history could not be loaded.</p> :
+        history.isPending ? <p role="status">Loading alert history…</p> :
+        !history.data.length ? <p className="muted">No acknowledgements in the past 30 days.</p> :
+        <ul>{history.data.map(entry => <li key={incidentKey(entry.event)}>
+          {entry.event.title} · {date(entry.acknowledged_at)}
+        </li>)}</ul>}
     </section>}
     {message && <p role="alert" className="error">{message}</p>}
     <main className="workspace">
@@ -259,7 +316,7 @@ function Dashboard({ user }: { user: User }) {
           <ul className="event-list">{items.map(item => <li key={incidentKey(item)}>
             <button onClick={() => select(item)} aria-pressed={incidentKey(item) === selectedId}>
               <span className={'priority level-' + item.severity}>{severity[item.severity]}</span>
-              <strong>{item.title}</strong><span>{item.provider} · {date(item.occurred_at)}</span>
+              <strong>{item.title}</strong><span>{item.provider} · {item.forecast_date ?? date(item.occurred_at)}</span>
             </button></li>)}</ul>}
       </section>
       <section className="panel terrain">
@@ -285,11 +342,10 @@ function Dashboard({ user }: { user: User }) {
             {selected.district && <p>District {selected.district} · Approximate area</p>}
             {selected.magnitude !== null && <p>Magnitude {selected.magnitude}</p>}
             {selected.depth_km !== null && <p>Depth {selected.depth_km.toFixed(1)} km</p>}
-            <p>{date(selected.occurred_at)}</p>
+            <p>{selected.forecast_date ?? date(selected.occurred_at)}</p>
             <a href={selected.source_url} target="_blank" rel="noreferrer">Source · {selected.provider}</a>
-            {selected.severity >= 2 && (acknowledged ?
-              <p>Acknowledged · {date(acknowledged)}</p> :
-              <button onClick={() => void acknowledge(selected)}>Acknowledge alert</button>)}
+            {alertStatus.data?.acknowledged_at ? <p>Acknowledged · {date(alertStatus.data.acknowledged_at)}</p> :
+              alertStatus.data?.eligible && <button onClick={() => void acknowledge(selected)}>Acknowledge alert</button>}
           </div> : <p className="empty">{dictionary.select}</p>}
         </section>
         <section className="panel">

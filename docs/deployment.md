@@ -2,6 +2,10 @@
 
 Use Docker Engine, the Compose plugin and OpenSSL. Run `./scripts/init-env.sh` and `docker compose up --build --wait`. The bootstrap token is in the ignored `.env` file. The setup endpoint closes after the first administrator is committed. Retain the database password securely.
 
+## Weather feeds
+
+New installations enable the two IPMA weather feeds by default. To enable them on an existing installation, add `ipma-observations,ipma-forecasts` to the existing comma-separated `ENABLED_PROVIDERS` value in the ignored `.env` file and recreate the services. Each installation retains its configured list of enabled providers.
+
 ## Local display, LAN and HTTPS
 
 The default origin is `http://localhost:8080`. For a separate display device, terminate HTTPS at a reverse proxy on the Docker host, proxy to port 8080, and set `PUBLIC_ORIGIN` to the exact HTTPS origin and `SECURE_COOKIES=true`. Keep the Compose port bound to loopback where the proxy is on the same host. Keep authentication enabled. Preserve the upstream host and allow streamed responses.

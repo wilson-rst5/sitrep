@@ -13,7 +13,7 @@ from nats.js.errors import NotFoundError
 from sqlalchemy import text
 
 from .db import engine
-from .providers import PROVIDERS, Event
+from .providers import DEFAULT_PROVIDERS, PROVIDERS, Event
 
 SUBJECT = "sitrep.events.v1"
 
@@ -43,6 +43,17 @@ def health(conn, identifier, attempted, error):
                succeeded=attempted if error is None else None, error=error))
 
 
+async def fetch_json(client, url):
+    body = bytearray()
+    async with client.stream("GET", url) as response:
+        response.raise_for_status()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > 8 * 1024 * 1024:
+                raise ValueError("Response too large")
+    return json.loads(body)
+
+
 async def collect(provider, js, client):
     failures = 0
     while True:
@@ -59,14 +70,10 @@ async def collect(provider, js, client):
                         health(conn, provider.id, attempted, "in_progress")
                         conn.commit()
                         try:
-                            body = bytearray()
-                            async with client.stream("GET", provider.url) as response:
-                                response.raise_for_status()
-                                async for chunk in response.aiter_bytes():
-                                    body.extend(chunk)
-                                    if len(body) > 8 * 1024 * 1024:
-                                        raise ValueError("Response too large")
-                            events = list(provider.normalize(json.loads(body), attempted))
+                            documents = [await fetch_json(client, url)
+                                         for url in (provider.url, *provider.additional_urls)]
+                            data = documents if provider.additional_urls else documents[0]
+                            events = list(provider.normalize(data, attempted))
                             for event in events:
                                 await js.publish(SUBJECT, event.model_dump_json().encode())
                         except (httpx.HTTPError, ValueError, TypeError, KeyError, OverflowError, nats.errors.Error) as exc:
@@ -108,6 +115,7 @@ async def cleanup():
             removed = conn.execute(text("DELETE FROM events WHERE expires_at <= now()"))
             if removed.rowcount:
                 conn.execute(text("UPDATE event_revisions SET version = version + 1 WHERE id = 1"))
+            conn.execute(text("DELETE FROM alert_acknowledgements WHERE acknowledged_at <= now() - interval '30 days'"))
             conn.execute(text("DELETE FROM sessions WHERE expires_at <= now()"))
         await asyncio.sleep(3600)
 
@@ -142,7 +150,7 @@ async def main(role):
     connection, js = await broker()
     try:
         if role == "collector":
-            enabled = set(os.getenv("ENABLED_PROVIDERS", "usgs,ipma-warnings").split(","))
+            enabled = set(os.getenv("ENABLED_PROVIDERS", DEFAULT_PROVIDERS).split(","))
             async with httpx.AsyncClient(timeout=12, follow_redirects=False, trust_env=False) as client:
                 jobs = [collect(provider, js, client) for provider in PROVIDERS if provider.id in enabled]
                 if jobs:

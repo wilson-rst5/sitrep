@@ -23,6 +23,13 @@ async def main():
             # Publish the same revision twice to exercise idempotent storage.
             for _ in range(2):
                 await stream.publish(SUBJECT, event.model_dump_json().encode())
+        weather = Event(
+            provider="test-fixture", external_id="weather", category="weather_observation",
+            title="SIMULATED TEST WEATHER", latitude=47.21, longitude=-123.19,
+            occurred_at=now, updated_at=now, expires_at=now + timedelta(hours=1),
+            severity=0, source_url="https://example.org/",
+        )
+        await stream.publish(SUBJECT, weather.model_dump_json().encode())
     finally:
         await connection.close()
 

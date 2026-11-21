@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from sitrep.providers import Event, ipma, usgs
+from sitrep.providers import Event, ipma, ipma_forecasts, ipma_observations, usgs
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -42,3 +42,42 @@ def test_invalid_provider_payload_rejected():
         list(usgs({"type": "Fake", "features": []}, NOW))
     with pytest.raises(ValueError):
         list(ipma({"warnings": []}, NOW))
+
+
+def test_ipma_observations_use_latest_station_reading_and_skip_missing_values():
+    def observation(hour, temperature):
+        return {
+            "geometry": {"type": "Point", "coordinates": [-8.65, 40.64]},
+            "properties": {
+                "idEstacao": 101, "localEstacao": "Test station", "time": f"2026-01-01T{hour}:00:00",
+                "temperatura": temperature, "humidade": -99, "precAcumulada": 0,
+            },
+        }
+
+    event, = ipma_observations(
+        {"type": "FeatureCollection", "features": [observation("02", 9), observation("01", 8)]},
+        NOW.replace(hour=3),
+    )
+    assert event.external_id == "101"
+    assert event.occurred_at == NOW.replace(hour=2)
+    assert event.expires_at == NOW.replace(hour=6)
+    assert event.description == "Temperature 9 °C · Hourly precipitation 0 mm"
+    assert event.latitude == 40.64
+    assert event.severity == 0
+
+
+def test_ipma_daily_forecast_retains_calendar_day_and_azores_time_zone():
+    row = {"globalIdLocal": 101, "latitude": "38.7", "longitude": "-27.2",
+           "tMin": "10", "tMax": "15", "precipitaProb": "30"}
+    days = [
+        {"forecastDate": f"2026-01-0{number}", "dataUpdate": "2026-01-01T00:00:00", "data": [row]}
+        for number in (1, 2, 3)
+    ]
+    locations = {"data": [{"globalIdLocal": 101, "local": "Test town", "idRegiao": 3}]}
+    first, second, third = ipma_forecasts([*days, locations], NOW)
+    assert first.external_id == "101-2026-01-01"
+    assert first.title == "Daily forecast · Test town"
+    assert first.occurred_at == NOW.replace(hour=1)
+    assert first.forecast_date.isoformat() == "2026-01-01"
+    assert first.description == "Low 10 °C · High 15 °C · Rain probability 30 %"
+    assert second.occurred_at.day == 2 and third.occurred_at.day == 3
