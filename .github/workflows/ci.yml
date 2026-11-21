@@ -4,9 +4,22 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan Git history
+        run: |
+          docker run --rm \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+            -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.24.3 git --redact --log-opts=--all /repo
   python:
     runs-on: ubuntu-latest
     steps:
@@ -15,22 +28,20 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -r services/core/requirements.txt pytest ruff pip-audit
-      - run: ruff check services/core tests/unit
+      - run: ruff check --select E4,E7,E9,F services/core tests/unit
       - run: PYTHONPATH=services/core pytest tests/unit
       - run: pip-audit -r services/core/requirements.txt
   browser:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm --prefix apps/web install --no-audit
+      - run: npm --prefix apps/web ci --no-audit
       - run: npm --prefix apps/web audit --audit-level=high
       - run: npm --prefix apps/web run build
-      - run: npm install --no-save --no-package-lock @playwright/test
+      - run: npm install --no-save --no-package-lock @playwright/test@1.56.1
       - run: npx playwright install --with-deps chromium
       - run: scripts/init-env.sh
       - name: Build and start services
@@ -45,10 +56,7 @@ jobs:
           . ./.env
           set +a
           SITREP_TEST_SETUP_TOKEN="$SETUP_TOKEN" npx playwright test
-      - if: failure()
+      - if: failure() && hashFiles('.env') != ''
         run: docker compose logs --no-color
-      - if: always()
+      - if: always() && hashFiles('.env') != ''
         run: docker compose down --volumes
-      - name: Scan Git history
-        run: |
-          docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.24.3 git --redact /repo

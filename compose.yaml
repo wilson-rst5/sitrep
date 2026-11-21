@@ -19,7 +19,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes: [postgres:/var/lib/postgresql/data]
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U sitrep -d sitrep"]
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U sitrep -d sitrep"]
       interval: 5s
       timeout: 3s
       retries: 20

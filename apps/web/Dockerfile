@@ -1,7 +1,7 @@
 FROM node:24-alpine AS builder
 WORKDIR /app
 COPY apps/web/package*.json ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN npm ci
 COPY apps/web .
 ARG MAP_STYLE_URL
 ENV VITE_MAP_STYLE_URL=$MAP_STYLE_URL

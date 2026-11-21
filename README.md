@@ -21,8 +21,8 @@ Web traffic binds to the loopback interface by default. See [deployment](docs/de
 
 | Provider | Coverage | Implementation |
 | --- | --- | --- |
-| USGS GeoJSON | Worldwide | Implemented, deployment verification pending |
-| IPMA warnings | Portugal | Implemented, deployment verification pending |
+| USGS GeoJSON | Worldwide | Implemented, live delivery verification pending |
+| IPMA warnings | Portugal | Implemented, live delivery verification pending |
 | OpenSky, TomTom, NASA FIRMS | Provider-specific | Planned, account or key requirements apply |
 | AIS-Catcher and local ADS-B | Receiver coverage | Planned, compatible hardware or authorised feed required |
 | Additional incident, news, environment and weather data | Provider-specific | Planned, subject to documented terms |

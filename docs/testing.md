@@ -2,9 +2,9 @@
 
 ```sh
 python -m pip install -r services/core/requirements.txt pytest ruff
-ruff check services/core tests/unit
+ruff check --select E4,E7,E9,F services/core tests/unit
 PYTHONPATH=services/core pytest tests/unit
-npm --prefix apps/web install
+npm --prefix apps/web ci
 npm --prefix apps/web run build
 ```
 
