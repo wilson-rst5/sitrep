@@ -7,7 +7,7 @@
 - [x] Add kiosk controls, responsive layout, PWA offline page, CI and release workflows
 - [x] Build and start containers, run migrations and verify health
 - [x] Run provider, broker, API and browser tests with fixtures
-- [ ] Verify live provider data in the dashboard
+- [x] Verify live USGS and IPMA ingestion and display a live USGS earthquake in the dashboard
 - [ ] Add IPMA weather observations and forecasts, a permitted news feed and OpenSky aviation
 - [ ] Add incident, traffic, wildfire, air quality, maritime and imagery sources as permitted
 - [ ] Add monitoring rules, correlation, alert history, richer setup and administration

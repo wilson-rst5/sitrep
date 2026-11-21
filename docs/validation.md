@@ -9,4 +9,4 @@ The public source is on the `main` branch of [SITREP on GitHub](https://github.c
 | Provider normalization | Three pytest cases cover USGS and IPMA fixture data and event validation. |
 | Publication review | Gitleaks scans the publication files and public Git history. Environment files, local deployment overrides and private workspace data are ignored. |
 
-The dashboard smoke test uses simulated events with live providers disabled. Live provider delivery, extended kiosk operation, and production deployment remain open in the [roadmap](roadmap.md).
+The automated browser test uses simulated events with live providers disabled. A separate local Compose run fetched live USGS and IPMA data, persisted both feeds, and displayed a live USGS earthquake in the authenticated dashboard. Extended kiosk operation and production deployment remain open in the [roadmap](roadmap.md).

@@ -32,7 +32,7 @@ jobs:
       - run: PYTHONPATH=services/core pytest tests/unit
       - run: pip-audit -r services/core/requirements.txt
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
