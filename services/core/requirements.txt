@@ -1,7 +1,7 @@
 fastapi==0.165.0
 uvicorn==0.38.0
 SQLAlchemy==2.0.44
-psycopg[binary]==3.2.12
+psycopg[binary]==3.3.9
 alembic==1.17.2
 httpx==0.28.1
 nats-py==2.12.0
