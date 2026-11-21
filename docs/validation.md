@@ -1,10 +1,11 @@
 # Validation
 
-The public source is on the `main` branch of [SITREP on GitHub](https://github.com/wilson-rst5/sitrep). GitHub Actions runs lint, dependency audits, provider tests, a Compose and Chromium smoke test, and a Git history secret scan. Release tags repeat those checks before publishing images to GHCR.
+The public source is on the `main` branch of [SITREP on GitHub](https://github.com/wilson-rst5/sitrep). GitHub Actions runs lint, dependency audits, provider tests, a Compose and Chromium smoke test, and a Git history secret scan. Release tags repeat those checks before publishing images to GHCR. The [main CI run](https://github.com/wilson-rst5/sitrep/actions/runs/44947796731) and the [release workflow for 0.1.0-rc.1](https://github.com/wilson-rst5/sitrep/actions/runs/44947797092) passed.
 
 | Check | Coverage |
 | --- | --- |
 | Docker Compose | Builds the core and web images, starts PostGIS and NATS JetStream, applies the Alembic migration, and waits for the API and web health checks. |
+| Published images | Pulled both Linux amd64 images anonymously and started the production Compose configuration in an isolated project. The API returned `ready` through the web proxy. |
 | Ingestion and dashboard | Sends duplicate near and far event fixtures through JetStream. Chromium verifies administrator bootstrap, sign-in, local and global filtering, acknowledgement, kiosk mode, and mobile layout. |
 | Provider normalization | Three pytest cases cover USGS and IPMA fixture data and event validation. |
 | Publication review | Gitleaks scans the publication files and public Git history. Environment files, local deployment overrides and private workspace data are ignored. |

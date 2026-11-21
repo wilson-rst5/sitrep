@@ -30,4 +30,16 @@ For restore, use an isolated database and `pg_restore --exit-on-error` with the 
 
 ## Prebuilt images
 
-After images are published, set `SITREP_CORE_IMAGE`, `SITREP_WEB_IMAGE` and `SITREP_HTTPS_ORIGIN`, then run `docker compose -f compose.yaml -f compose.prod.yaml up -d --wait`. Pin the previously deployed image coordinate for rollback and consult migration compatibility. No published images are verified for this workspace.
+The [0.1.0 release candidate](https://github.com/wilson-rst5/sitrep/releases/tag/v0.1.0-rc.1) publishes Linux amd64 images. Add these settings to the generated `.env` on the Docker host, replacing the example origin with your HTTPS origin.
+
+```dotenv
+SITREP_CORE_IMAGE=ghcr.io/wilson-rst5/sitrep-core:0.1.0-rc.1
+SITREP_WEB_IMAGE=ghcr.io/wilson-rst5/sitrep-web:0.1.0-rc.1
+SITREP_HTTPS_ORIGIN=https://sitrep.example.org
+```
+
+```sh
+docker compose -f compose.yaml -f compose.prod.yaml up -d --wait
+```
+
+Keep the previously deployed image references for rollback and check database migration compatibility before rolling back.

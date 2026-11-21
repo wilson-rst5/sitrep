@@ -13,4 +13,4 @@
 - [ ] Add monitoring rules, correlation, alert history, richer setup and administration
 - [ ] Measure prolonged kiosk performance and complete dependency, licence and secret audits
 - [x] Publish public GitHub repository
-- [ ] Publish GHCR images after the release gates pass
+- [x] Publish GHCR images after the release gates pass
