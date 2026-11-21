@@ -9,7 +9,8 @@
 - [x] Run provider, broker, API and browser tests with fixtures
 - [x] Verify live USGS and IPMA ingestion and display a live USGS earthquake in the dashboard
 - [x] Add IPMA station observations and three-day forecasts
-- [ ] Add a permitted news feed and OpenSky aviation
+- [x] Add NOAA news headline syndication
+- [ ] Integrate and validate OpenSky aviation
 - [x] Add NASA EONET wildfire and natural incident reports
 - [ ] Add traffic, air quality, maritime and imagery sources as permitted
 - [x] Add category-specific alert thresholds and per-user acknowledgement history

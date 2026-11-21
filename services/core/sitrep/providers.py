@@ -4,9 +4,11 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from email.utils import parsedate_to_datetime
 from math import isfinite
 from collections.abc import Callable, Iterable
 from urllib.parse import urlsplit
+from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 from pydantic import AwareDatetime, BaseModel, Field, HttpUrl, model_validator
@@ -220,6 +222,49 @@ def eonet(document, fetched_at):
         )
 
 
+NOAA_ROOT = "https://www.noaa.gov"
+
+
+def parse_rss(body):
+    document = body.decode("utf-8-sig")
+    if "<!" in document and re.search(r"<!\s*(DOCTYPE|ENTITY)\b", document, re.IGNORECASE):
+        raise ValueError("RSS document type declarations are unsupported")
+    try:
+        root = ElementTree.fromstring(document)
+    except ElementTree.ParseError as exc:
+        raise ValueError("Invalid RSS document") from exc
+    channel = root.find("channel")
+    if root.tag != "rss" or channel is None:
+        raise ValueError("Missing RSS channel")
+    return channel
+
+
+def noaa_headlines(channel, fetched_at):
+    for item in channel.findall("item"):
+        url = (item.findtext("link") or "").strip()
+        title = (item.findtext("title") or "").strip()
+        stamp = (item.findtext("pubDate") or "").strip()
+        if not title or not stamp:
+            continue
+        address = urlsplit(url)
+        if address.scheme != "https" or address.netloc != "www.noaa.gov" or not address.path:
+            continue
+        try:
+            published = parsedate_to_datetime(stamp)
+        except ValueError:
+            continue
+        if published.tzinfo is None:
+            continue
+        expires = published + timedelta(days=30)
+        if published > fetched_at or expires <= fetched_at:
+            continue
+        yield Event(
+            provider="noaa-news", external_id=hashlib.sha256(url.encode()).hexdigest(),
+            category="news", title=title, occurred_at=published, updated_at=published,
+            expires_at=expires, severity=0, source_url=url,
+        )
+
+
 @dataclass(frozen=True)
 class Provider:
     id: str
@@ -233,6 +278,7 @@ class Provider:
     terms: str
     credentials: str = "none"
     additional_urls: tuple[str, ...] = ()
+    decode: Callable[[bytes], object] = json.loads
 
 
 PROVIDERS = (
@@ -250,6 +296,9 @@ PROVIDERS = (
     Provider("nasa-eonet", "NASA EONET", EONET_ROOT + "/docs/v3",
              EONET_EVENTS + "?status=open&days=30&category=wildfires,volcanoes,floods,landslides,severeStorms",
              "natural_incident", "Worldwide", 1800, eonet, EONET_ROOT + "/what-is-eonet"),
+    Provider("noaa-news", "NOAA News", NOAA_ROOT + "/rss-feeds", NOAA_ROOT + "/rss.xml",
+             "news", "NOAA publications", 3600, noaa_headlines,
+             NOAA_ROOT + "/office-education/outreach-communication/faq", decode=parse_rss),
 )
 
 DEFAULT_PROVIDERS = ",".join(provider.id for provider in PROVIDERS)

@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from sitrep.providers import Event, eonet, ipma, ipma_forecasts, ipma_observations, usgs
+from sitrep.providers import Event, eonet, ipma, ipma_forecasts, ipma_observations, noaa_headlines, parse_rss, usgs
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -101,3 +101,27 @@ def test_eonet_uses_latest_reported_point_and_excludes_closed_events():
     assert event.occurred_at.isoformat() == "2025-12-31T00:00:00+00:00"
     assert event.severity == 1 and not event.official
     assert str(event.source_url) == "https://eonet.gsfc.nasa.gov/api/v3/events/EONET_example"
+
+
+def test_noaa_news_uses_headline_and_original_link_only():
+    channel = parse_rss(b"""<rss><channel>
+        <item><title>Test NOAA headline</title>
+          <link>https://www.noaa.gov/news/test</link>
+          <pubDate>Wed, 31 Dec 2025 12:00:00 GMT</pubDate>
+          <description>Article content stays at the source.</description>
+        </item>
+        <item><title>External link</title><link>https://example.org/news</link>
+          <pubDate>Wed, 31 Dec 2025 12:00:00 GMT</pubDate>
+        </item>
+    </channel></rss>""")
+    article, = noaa_headlines(channel, NOW)
+    assert article.category == "news"
+    assert article.title == "Test NOAA headline"
+    assert article.description == ""
+    assert article.latitude is None and article.longitude is None
+    assert str(article.source_url) == "https://www.noaa.gov/news/test"
+
+
+def test_noaa_rss_rejects_document_type_declarations():
+    with pytest.raises(ValueError, match="document type"):
+        parse_rss(b"<!DOCTYPE rss><rss><channel /></rss>")

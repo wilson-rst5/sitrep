@@ -43,7 +43,7 @@ def health(conn, identifier, attempted, error):
                succeeded=attempted if error is None else None, error=error))
 
 
-async def fetch_json(client, url):
+async def fetch_document(client, url, decode):
     body = bytearray()
     async with client.stream("GET", url) as response:
         response.raise_for_status()
@@ -51,7 +51,7 @@ async def fetch_json(client, url):
             body.extend(chunk)
             if len(body) > 8 * 1024 * 1024:
                 raise ValueError("Response too large")
-    return json.loads(body)
+    return decode(bytes(body))
 
 
 async def collect(provider, js, client):
@@ -70,7 +70,7 @@ async def collect(provider, js, client):
                         health(conn, provider.id, attempted, "in_progress")
                         conn.commit()
                         try:
-                            documents = [await fetch_json(client, url)
+                            documents = [await fetch_document(client, url, provider.decode)
                                          for url in (provider.url, *provider.additional_urls)]
                             data = documents if provider.additional_urls else documents[0]
                             events = list(provider.normalize(data, attempted))

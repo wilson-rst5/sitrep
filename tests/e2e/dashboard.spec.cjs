@@ -53,6 +53,9 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await page.getByRole('button', { name: 'Emergency', exact: true }).click();
   await expect(page.getByRole('button', { name: /SIMULATED TEST WILDFIRE/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /SIMULATED TEST WEATHER/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'News', exact: true }).click();
+  await expect(page.getByRole('button', { name: /SIMULATED TEST HEADLINE/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /SIMULATED TEST WILDFIRE/ })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('heading', { name: 'Operational map' })).toBeVisible();
   await expect(page.locator('body')).toHaveCSS('overflow-x', 'visible');

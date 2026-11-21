@@ -7,7 +7,7 @@ The public source is on the `main` branch of [SITREP on GitHub](https://github.c
 | Docker Compose | Builds the core and web images, starts PostGIS and NATS JetStream, applies the Alembic migration, and waits for the API and web health checks. |
 | Published images | Pulled both Linux amd64 images anonymously and started the production Compose configuration in an isolated project. The API returned `ready` through the web proxy. |
 | Ingestion and dashboard | Sends duplicate near and far event fixtures through JetStream. Chromium verifies administrator bootstrap, sign-in, filtering, alert rules and history, related events, monitoring-area edits, viewer permissions, kiosk mode and mobile layout. |
-| Provider normalization | Six pytest cases cover USGS, IPMA and NASA EONET fixture data and event validation. |
+| Provider normalization | Eight pytest cases cover USGS, IPMA, NASA EONET and NOAA RSS fixtures and validation. |
 | Database upgrade | Applied the alert migration to a database with an existing acknowledgement, verified snapshot backfill, and deleted the original test event to verify independent history retention. |
 | Kiosk smoke soak | An isolated Chromium session stayed responsive and showed a stable event count for three minutes over six refresh intervals. |
 | Application licence inventory | Checked declared npm lockfile and installed Python package licences. Container base-image packages and data redistribution terms require separate review. |

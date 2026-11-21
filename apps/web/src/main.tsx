@@ -11,24 +11,24 @@ const client = new QueryClient({ defaultOptions: { queries: {
 } } });
 const labels = {
   en: { normal: 'Overview', weather: 'Weather', emergency: 'Emergency', aviation: 'Aviation',
-    maritime: 'Maritime', traffic: 'Traffic', global: 'Global', network: 'Data sources',
+    maritime: 'Maritime', traffic: 'Traffic', news: 'News', global: 'Global', network: 'Data sources',
     feed: 'Event feed', area: 'Monitoring area', map: 'Operational map', warning: 'Official warnings',
     empty: 'No events match the current filters.', unavailable: 'No data source configured for this mode.',
     observer: 'Event detail', select: 'Select an event from the feed or map.', settings: 'Settings',
     fresh: 'Connected', retry: 'Connection interrupted', checking: 'Connecting', signout: 'Sign out' },
   'pt-PT': { normal: 'Resumo', weather: 'Meteorologia', emergency: 'Emergência', aviation: 'Aviação',
-    maritime: 'Marítimo', traffic: 'Trânsito', global: 'Global', network: 'Fontes de dados',
+    maritime: 'Marítimo', traffic: 'Trânsito', news: 'Notícias', global: 'Global', network: 'Fontes de dados',
     feed: 'Eventos', area: 'Área monitorizada', map: 'Mapa operacional', warning: 'Avisos oficiais',
     empty: 'Nenhum evento corresponde aos filtros.', unavailable: 'Nenhuma fonte configurada para este modo.',
     observer: 'Detalhes do evento', select: 'Selecione um evento na lista ou no mapa.', settings: 'Definições',
     fresh: 'Ligado', retry: 'Ligação interrompida', checking: 'A ligar', signout: 'Terminar sessão' },
 };
-const modes = ['normal', 'weather', 'emergency', 'aviation', 'maritime', 'traffic', 'global'] as const;
+const modes = ['normal', 'weather', 'emergency', 'aviation', 'maritime', 'traffic', 'news', 'global'] as const;
 type Mode = typeof modes[number];
 const categories = {
   weather: ['weather_warning', 'weather_observation', 'weather_forecast'],
   emergency: ['earthquake', 'weather_warning', 'wildfire', 'natural_incident'],
-  aviation: ['aircraft'], maritime: ['vessel'], traffic: ['traffic'],
+  aviation: ['aircraft'], maritime: ['vessel'], traffic: ['traffic'], news: ['news'],
 };
 const unsupported = new Set<Mode>(['aviation', 'maritime', 'traffic']);
 const severity = ['Information', 'Routine', 'Important', 'High', 'Critical'];
@@ -164,7 +164,7 @@ function Dashboard({ user }: { user: User }) {
   const area = areas.data?.find(item => item.id === areaId) ?? areas.data?.[0];
   const editedArea = areas.data?.find(item => item.id === editAreaId);
   const dictionary = labels[area?.language ?? 'en'];
-  const global = mode === 'global';
+  const global = mode === 'global' || mode === 'news';
   const modeCategories = mode in categories ? categories[mode as keyof typeof categories] : [];
   const query = new URLSearchParams({ severity: String(minimum), limit: '500' });
   if (area && !global) query.set('location_id', String(area.id));

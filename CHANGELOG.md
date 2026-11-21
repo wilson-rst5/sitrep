@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-rc.3
+
+- Added a News view with NOAA headlines and original article links.
+
 ## 0.1.0-rc.2
 
 - Added configurable alert thresholds and 30-day acknowledgement history.
