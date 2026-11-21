@@ -1,0 +1,10 @@
+**
+!apps/
+!apps/web/
+!apps/web/**
+apps/web/dist/
+apps/web/public/countries.geojson
+apps/web/node_modules/
+!infrastructure/
+!infrastructure/proxy/
+!infrastructure/proxy/nginx.conf

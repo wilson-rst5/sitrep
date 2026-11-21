@@ -1,0 +1,9 @@
+**
+!requirements.txt
+!alembic.ini
+!migrations/
+!migrations/**
+!sitrep/
+!sitrep/**
+**/__pycache__/
+**/*.pyc

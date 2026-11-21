@@ -1,0 +1,95 @@
+name: sitrep
+x-core: &core
+  image: sitrep-core:local
+  build: ./services/core
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+x-database-environment: &database-environment
+  DATABASE_URL: postgresql+psycopg://sitrep:${POSTGRES_PASSWORD:?Run scripts/init-env.sh}@db:5432/sitrep
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sitrep
+      POSTGRES_DB: sitrep
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U sitrep -d sitrep"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  nats:
+    image: nats:2.11-alpine
+    command: [-js, -sd, /data, -m, "8222"]
+    restart: unless-stopped
+    volumes: [jetstream:/data]
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO /dev/null http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *core
+    restart: "no"
+    command: [alembic, upgrade, head]
+    environment: *database-environment
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    <<: *core
+    environment:
+      <<: *database-environment
+      SETUP_TOKEN: ${SETUP_TOKEN:?Run scripts/init-env.sh}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 10s
+      timeout: 4s
+      retries: 6
+  collector:
+    <<: *core
+    command: [python, -m, sitrep.worker, collector]
+    environment:
+      <<: *database-environment
+      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      nats: {condition: service_healthy}
+  consumer:
+    <<: *core
+    command: [python, -m, sitrep.worker, consumer]
+    environment: *database-environment
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      nats: {condition: service_healthy}
+  web:
+    image: sitrep-web:local
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        MAP_STYLE_URL: ${MAP_STYLE_URL:-}
+    restart: unless-stopped
+    init: true
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "${SITREP_BIND:-127.0.0.1}:${SITREP_PORT:-8080}:8080"
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO /dev/null http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+volumes:
+  postgres:
+  jetstream:

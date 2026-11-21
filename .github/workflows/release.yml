@@ -1,0 +1,38 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          version="${GITHUB_REF_NAME#v}"
+          printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([+-][a-zA-Z0-9.-]+)?$'
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          core="ghcr.io/$owner/sitrep-core"
+          web="ghcr.io/$owner/sitrep-web"
+          docker build -t "$core:$version" -t "$core:sha-$GITHUB_SHA" services/core
+          docker build -t "$web:$version" -t "$web:sha-$GITHUB_SHA" -f apps/web/Dockerfile .
+          docker push "$core:$version"
+          docker push "$core:sha-$GITHUB_SHA"
+          docker push "$web:$version"
+          docker push "$web:sha-$GITHUB_SHA"
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --prerelease

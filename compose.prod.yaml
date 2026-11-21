@@ -1,0 +1,19 @@
+services:
+  migrate:
+    build: !reset null
+    image: ${SITREP_CORE_IMAGE:?Set SITREP_CORE_IMAGE to a published image}
+  api:
+    build: !reset null
+    image: ${SITREP_CORE_IMAGE:?Set SITREP_CORE_IMAGE to a published image}
+    environment:
+      SECURE_COOKIES: "true"
+      PUBLIC_ORIGIN: ${SITREP_HTTPS_ORIGIN:?Set SITREP_HTTPS_ORIGIN}
+  collector:
+    build: !reset null
+    image: ${SITREP_CORE_IMAGE:?Set SITREP_CORE_IMAGE to a published image}
+  consumer:
+    build: !reset null
+    image: ${SITREP_CORE_IMAGE:?Set SITREP_CORE_IMAGE to a published image}
+  web:
+    build: !reset null
+    image: ${SITREP_WEB_IMAGE:?Set SITREP_WEB_IMAGE to a published image}

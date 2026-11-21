@@ -1,0 +1,35 @@
+const { test, expect } = require('@playwright/test');
+
+test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
+  await page.goto('/?kiosk=1');
+  await expect(page.getByRole('heading', { name: 'Create administrator' })).toBeVisible();
+  await page.getByLabel('Bootstrap token').fill(process.env.SITREP_TEST_SETUP_TOKEN);
+  await page.getByLabel('Username').fill('playwright-admin');
+  await page.getByLabel('Password').fill('temporary-test-password');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByLabel('Area name').fill('Test area');
+  await page.getByLabel('Country code').fill('US');
+  await page.getByLabel('Latitude').fill('47.2');
+  await page.getByLabel('Longitude').fill('-123.2');
+  await page.getByRole('button', { name: 'Complete setup' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await page.getByLabel('Username').fill('playwright-admin');
+  await page.getByLabel('Password').fill('temporary-test-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('heading', { name: 'Operational map' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Exit kiosk' })).toBeVisible();
+  const nearEvent = page.getByRole('button', { name: /SIMULATED TEST EVENT \(near\)/ });
+  await expect(nearEvent).toHaveCount(1);
+  await expect(page.getByText('SIMULATED TEST EVENT (far)')).toHaveCount(0);
+  await nearEvent.click();
+  await expect(page.getByRole('link', { name: 'Source · test-fixture' })).toHaveAttribute('href', 'https://example.org/');
+  await page.getByRole('button', { name: 'Acknowledge alert' }).click();
+  await expect(page.getByText(/Acknowledged ·/)).toBeVisible();
+  await page.getByRole('button', { name: 'Global' }).click();
+  await expect(page.getByRole('button', { name: 'Global' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('SIMULATED TEST EVENT (far)')).toHaveCount(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('heading', { name: 'Operational map' })).toBeVisible();
+  await expect(page.locator('body')).toHaveCSS('overflow-x', 'visible');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
