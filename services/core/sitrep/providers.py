@@ -32,6 +32,14 @@ class Event(BaseModel):
     magnitude: float | None = Field(default=None, allow_inf_nan=False)
     depth_km: float | None = Field(default=None, allow_inf_nan=False)
     forecast_date: date | None = None
+    original_source: str | None = Field(default=None, max_length=120)
+    road: str | None = Field(default=None, max_length=120)
+    event_status: str | None = Field(default=None, max_length=40)
+    delay_seconds: int | None = Field(default=None, ge=0)
+    direction_from: str | None = Field(default=None, max_length=240)
+    direction_to: str | None = Field(default=None, max_length=240)
+    reported_at: AwareDatetime | None = None
+    line: list[tuple[float, float]] | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def validate_event(self):
@@ -279,6 +287,8 @@ class Provider:
     credentials: str = "none"
     additional_urls: tuple[str, ...] = ()
     decode: Callable[[bytes], object] = json.loads
+    request_headers: Callable[[], dict[str, str]] | None = None
+    configured: bool = True
 
 
 PROVIDERS = (

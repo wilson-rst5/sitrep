@@ -50,6 +50,14 @@ services:
       SETUP_TOKEN: ${SETUP_TOKEN:?Run scripts/init-env.sh}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
       SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
+      FIRMS_BBOX: ${FIRMS_BBOX:-}
+      TOMTOM_INCIDENTS_ENABLED: ${TOMTOM_INCIDENTS_ENABLED:-false}
+      TOMTOM_SEGMENT_ENABLED: ${TOMTOM_SEGMENT_ENABLED:-false}
+      TOMTOM_FLOW_ENABLED: ${TOMTOM_FLOW_ENABLED:-false}
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
+      TOMTOM_TRAFFIC_BBOX: ${TOMTOM_TRAFFIC_BBOX:-}
+      TRANSITO_AGORA_API_KEY: ${TRANSITO_AGORA_API_KEY:-}
       ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings,ipma-observations,ipma-forecasts,nasa-eonet,noaa-news}
     depends_on:
       migrate: {condition: service_completed_successfully}
@@ -63,6 +71,14 @@ services:
     command: [python, -m, sitrep.worker, collector]
     environment:
       <<: *database-environment
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
+      FIRMS_BBOX: ${FIRMS_BBOX:-}
+      TOMTOM_INCIDENTS_ENABLED: ${TOMTOM_INCIDENTS_ENABLED:-false}
+      TOMTOM_SEGMENT_ENABLED: ${TOMTOM_SEGMENT_ENABLED:-false}
+      TOMTOM_FLOW_ENABLED: ${TOMTOM_FLOW_ENABLED:-false}
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
+      TOMTOM_TRAFFIC_BBOX: ${TOMTOM_TRAFFIC_BBOX:-}
+      TRANSITO_AGORA_API_KEY: ${TRANSITO_AGORA_API_KEY:-}
       ENABLED_PROVIDERS: ${ENABLED_PROVIDERS-usgs,ipma-warnings,ipma-observations,ipma-forecasts,nasa-eonet,noaa-news}
     depends_on:
       migrate: {condition: service_completed_successfully}

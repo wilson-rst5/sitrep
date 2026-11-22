@@ -17,6 +17,10 @@ Open [the dashboard](http://localhost:8080/). Use the generated `SETUP_TOKEN` in
 
 Web traffic binds to the loopback interface by default. See [deployment](docs/deployment.md) for HTTPS, LAN kiosks, PWA installation, persistence and rollback. The maps use OpenFreeMap by default, with bundled Natural Earth country boundaries available offline. See [map and location configuration](docs/maps-and-location.md) for provider setup.
 
+## Operations map
+
+The map is the primary workspace. Layer controls, incident filtering and source details open on demand. Set the monitoring area to focus the map, or use Map only for a clean display. See [traffic and map assets](docs/traffic-and-map-assets.md) for optional licensed feeds and deployment-owned bridges, watched roads and public cameras.
+
 ## Data and architecture
 
 | Provider | Coverage | Implementation |

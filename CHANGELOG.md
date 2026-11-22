@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-rc.1
+
+- Promoted the operational map to the full workspace, with floating filters, event selection and a map-only view.
+- Separated forecasts and observations from the operational feed.
+- Added optional TomTom, Trânsito Agora and NASA FIRMS adapters and a configurable bridge, road and public camera registry.
+
 ## 0.2.0-rc.1
 
 - Added labeled OpenFreeMap basemaps and a bundled MapLibre worker.

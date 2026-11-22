@@ -14,6 +14,8 @@ from sqlalchemy import text
 
 from .db import engine
 from .providers import DEFAULT_PROVIDERS, PROVIDERS, Event
+from .traffic import traffic_providers
+from .firms import firms_provider
 
 SUBJECT = "sitrep.events.v1"
 
@@ -43,9 +45,9 @@ def health(conn, identifier, attempted, error):
                succeeded=attempted if error is None else None, error=error))
 
 
-async def fetch_document(client, url, decode):
+async def fetch_document(client, url, decode, headers=None):
     body = bytearray()
-    async with client.stream("GET", url) as response:
+    async with client.stream("GET", url, headers=headers) as response:
         response.raise_for_status()
         async for chunk in response.aiter_bytes():
             body.extend(chunk)
@@ -70,7 +72,8 @@ async def collect(provider, js, client):
                         health(conn, provider.id, attempted, "in_progress")
                         conn.commit()
                         try:
-                            documents = [await fetch_document(client, url, provider.decode)
+                            headers = provider.request_headers() if provider.request_headers else None
+                            documents = [await fetch_document(client, url, provider.decode, headers)
                                          for url in (provider.url, *provider.additional_urls)]
                             data = documents if provider.additional_urls else documents[0]
                             events = list(provider.normalize(data, attempted))
@@ -152,7 +155,10 @@ async def main(role):
         if role == "collector":
             enabled = set(os.getenv("ENABLED_PROVIDERS", DEFAULT_PROVIDERS).split(","))
             async with httpx.AsyncClient(timeout=12, follow_redirects=False, trust_env=False) as client:
-                jobs = [collect(provider, js, client) for provider in PROVIDERS if provider.id in enabled]
+                jobs = [collect(provider, js, client) for provider in (*PROVIDERS, *traffic_providers(), firms_provider())
+                        if provider.configured and (provider.id in enabled or
+                            (provider.request_headers and os.getenv(provider.credentials))) and
+                        (not provider.request_headers or os.getenv(provider.credentials))]
                 if jobs:
                     await asyncio.gather(*jobs)
                 else:

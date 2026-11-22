@@ -19,6 +19,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from .db import engine, ready
 from .geocoding import Coordinates, Geography, resolve, search_places
 from .providers import DEFAULT_PROVIDERS, PROVIDERS, Event
+from .traffic import traffic_providers
+from .firms import firms_provider
+from .flow import fetch_tile, flow_status, segment_snapshot
+from .map_assets import MapAsset, asset_view
 
 passwords = PasswordHasher()
 cookie_secure = os.getenv("SECURE_COOKIES", "true") == "true"
@@ -296,12 +300,14 @@ def providers(_user=Depends(require_user)):
         health_rows = {row.provider: row for row in conn.execute(text("SELECT * FROM provider_health"))}
     enabled = set(os.getenv("ENABLED_PROVIDERS", DEFAULT_PROVIDERS).split(","))
     result = []
-    for provider in PROVIDERS:
+    for provider in (*PROVIDERS, *traffic_providers(), firms_provider()):
         row = health_rows.get(provider.id)
         success = row.succeeded_at if row else None
         age = (datetime.now(UTC) - success).total_seconds() if success else float("inf")
         state = "DISABLED"
-        if provider.id in enabled:
+        if provider.request_headers and not os.getenv(provider.credentials):
+            state = "NEEDS_KEY"
+        elif provider.configured and (provider.id in enabled or provider.request_headers):
             state = "OFFLINE" if age > provider.interval_seconds * 5 else (
                 "DEGRADED" if row.error or age > provider.interval_seconds * 2 else "ONLINE"
             )
@@ -313,10 +319,76 @@ def providers(_user=Depends(require_user)):
     return result
 
 
+@api.get("/traffic/status")
+def traffic_status(_user=Depends(require_user)):
+    return flow_status()
+
+
+@api.get("/traffic/tiles/{zoom}/{x}/{y}.png")
+def traffic_tile(zoom: int, x: int, y: int, _user=Depends(require_user)):
+    if not 8 <= zoom <= 19 or not (0 <= x < 2 ** zoom and 0 <= y < 2 ** zoom):
+        raise HTTPException(404, "Tile outside supported range")
+    status, tile = fetch_tile(zoom, x, y)
+    if tile is None:
+        raise HTTPException(status, "Traffic flow unavailable")
+    return Response(tile, media_type="image/png")
+
+
+@api.get("/map-assets")
+def map_assets(location_id: int | None = None, user=Depends(require_user)):
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT a.id, a.payload FROM map_assets a
+            LEFT JOIN locations l ON l.id=:location_id
+            WHERE (a.enabled OR :admin)
+                AND (:location_id IS NULL OR ST_DWithin(a.point,
+                    ST_SetSRID(ST_MakePoint(l.longitude,l.latitude),4326)::geography, l.radius * 1000))
+            ORDER BY a.id LIMIT 500
+        """), {"location_id": location_id, "admin": user["role"] == "admin" and location_id is None}).mappings()
+        return [asset_view(row) for row in rows]
+
+
+@api.get("/map-assets/{asset_id}/traffic")
+def asset_traffic(asset_id: int, _user=Depends(require_user)):
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT latitude, longitude FROM map_assets
+            WHERE id=:id AND enabled AND kind IN ('bridge','road_watch')
+        """), {"id": asset_id}).first()
+    if not row:
+        raise HTTPException(404, "Map asset unavailable")
+    return segment_snapshot(row.latitude, row.longitude)
+
+
+@api.post("/map-assets", status_code=201)
+def create_map_asset(asset: MapAsset, user=Depends(require_admin)):
+    with engine.begin() as conn:
+        identifier = conn.execute(text("""
+            INSERT INTO map_assets (kind, latitude, longitude, enabled, payload)
+            VALUES (:kind,:latitude,:longitude,:enabled,CAST(:payload AS jsonb)) RETURNING id
+        """), {**asset.model_dump(), "payload": asset.model_dump_json()}).scalar_one()
+        audit(conn, user["username"], "map_asset_created")
+    return {"id": identifier}
+
+
+@api.post("/map-assets/{asset_id}")
+def update_map_asset(asset_id: int, asset: MapAsset, user=Depends(require_admin)):
+    with engine.begin() as conn:
+        identifier = conn.execute(text("""
+            UPDATE map_assets SET kind=:kind, latitude=:latitude, longitude=:longitude, enabled=:enabled,
+                payload=CAST(:payload AS jsonb) WHERE id=:id RETURNING id
+        """), {**asset.model_dump(), "id": asset_id, "payload": asset.model_dump_json()}).scalar()
+        if identifier is None:
+            raise HTTPException(404, "Map asset unavailable")
+        audit(conn, user["username"], "map_asset_updated")
+    return {"id": identifier}
+
+
 @api.get("/events", response_model=list[Event])
 def events(location_id: Annotated[int | None, Query(ge=1)] = None,
            category: Annotated[list[Annotated[str, Field(min_length=1, max_length=40)]] | None,
-                               Query(max_length=12)] = None,
+                               Query(max_length=24)] = None,
+           radius_km: Annotated[int | None, Query(ge=1, le=2000)] = None,
            severity: Annotated[int, Query(ge=0, le=4)] = 0,
            limit: Annotated[int, Query(ge=1, le=500)] = 200,
            offset: Annotated[int, Query(ge=0, le=10000)] = 0,
@@ -336,7 +408,7 @@ def events(location_id: Annotated[int | None, Query(ge=1)] = None,
                 OR (point IS NULL AND district = :district AND :country = 'PT')
             )"""
             params.update(lon=location.longitude, lat=location.latitude,
-                          meters=location.radius * 1000, district=location.district,
+                          meters=(radius_km or location.radius) * 1000, district=location.district,
                           country=location.country)
         return list(conn.execute(text(f"""
             SELECT payload FROM events WHERE expires_at > now() AND severity >= :severity

@@ -21,3 +21,9 @@ Public routes include health, setup status, bootstrap and login. Login sets an H
 Location responses include `geography` and `is_primary`. A reverse lookup can leave the ISO country code unresolved, in which case `country` is null. Existing location writes can omit `geography` to preserve stored metadata.
 
 `POST /api/v1/locations/{id}/primary` sets the default area. `DELETE /api/v1/locations/{id}` deletes an area. Both require an administrator. `POST /api/v1/locations/reverse-geocode` resolves available metadata and an offline timezone for WGS84 coordinates. `POST /api/v1/locations/search` is available with a configured search provider. These lookups require an authenticated session or the active first-run token. `GET /api/v1/locations/geocoder-status` exposes provider availability flags.
+
+## Traffic and map assets
+
+`GET /events` accepts an optional `radius_km` override for a saved location. Traffic reports can include original attribution, road, reported time, delay and source geometry. TomTom flow status and raster tiles use `GET /traffic/status` and `GET /traffic/tiles/{z}/{x}/{y}.png`. Traffic services require an authenticated session.
+
+`GET /map-assets` optionally accepts `location_id`. Administrator writes use `POST /map-assets` and `POST /map-assets/{id}`. Bridge restrictions expire at their recorded time. `GET /map-assets/{id}/traffic` returns the nearest licensed sample or null. Cameras use publisher-hosted media and links. API services never fetch camera URLs.

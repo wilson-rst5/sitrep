@@ -16,7 +16,7 @@ test('map failure exposes a working offline fallback', async ({ page }) => {
 });
 
 test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
-  test.setTimeout(90000);
+  test.setTimeout(150000);
   const tile = page.waitForResponse(response =>
     response.url().includes('tiles.openfreemap.org') && /\.(pbf|mvt)(?:\?|$)/.test(response.url()) &&
     response.ok(), { timeout: 35000 });
@@ -60,14 +60,26 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await expect(operationsMap.getByText(/OpenStreetMap/)).toBeVisible({ timeout: 25000 });
   await expect(operationsMap).toHaveAttribute('data-map-ready', 'true', { timeout: 30000 });
   const layout = await page.locator('.terrain').boundingBox();
-  expect(layout.width).toBeGreaterThan(1920 * 0.55);
+  expect(layout.width).toBeGreaterThan(1920 * 0.9);
+  expect(layout.height).toBeGreaterThan(1080 * 0.85);
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(1080);
   const stored = (await (await page.request.get('/api/v1/locations')).json())[0];
   expect(stored).toMatchObject({ latitude: 47.2, longitude: -123.2, radius: 100, is_primary: true });
-  if (process.env.SITREP_SCREENSHOTS) await page.screenshot({ path: process.env.SITREP_SCREENSHOTS + '/operations-map.png' });
+  if (process.env.SITREP_SCREENSHOTS) await page.screenshot({ path: process.env.SITREP_SCREENSHOTS + '/map-first-1080.png' });
   await page.reload();
   await expect(page.getByRole('combobox', { name: 'Monitoring area' })).toHaveValue(String(stored.id));
   await expect(page.getByRole('button', { name: 'Exit kiosk' })).toBeVisible();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(page.getByText('needs key')).toBeVisible();
+  const quakes = page.getByRole('checkbox', { name: /Earthquakes/ });
+  await quakes.uncheck();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: /^Incidents ·/ }).click();
+  await expect(page.getByRole('button', { name: /SIMULATED TEST EVENT \(near\)/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await quakes.check();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(page.getByRole('button', { name: /SIMULATED TEST WEATHER/ })).toHaveCount(0);
   const nearEvent = page.getByRole('button', { name: /SIMULATED TEST EVENT \(near\)/ });
   await expect(nearEvent).toHaveCount(1);
   await expect(page.getByText('SIMULATED TEST EVENT (far)')).toHaveCount(0);
@@ -107,6 +119,34 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   expect((await (await page.request.get('/api/v1/locations')).json())[0]).toMatchObject({ id: secondId, is_primary: true });
   expect((await page.request.delete('/api/v1/locations/' + secondId, { headers: locationOrigin })).ok()).toBe(true);
   expect((await (await page.request.get('/api/v1/locations')).json())[0]).toMatchObject({ id: stored.id, is_primary: true });
+  const camera = await page.request.post('/api/v1/map-assets', {
+    headers: locationOrigin, data: { kind: 'camera', name: 'Test publisher camera', attribution: 'Test publisher',
+      latitude: stored.latitude, longitude: stored.longitude, source_url: 'https://example.org/camera' },
+  });
+  expect(camera.status()).toBe(201);
+  await page.reload();
+  await page.getByRole('button', { name: 'Return to area' }).click();
+  await expect(operationsMap).toHaveAttribute('data-map-ready', 'true', { timeout: 30000 });
+  await operationsMap.locator('canvas').click();
+  await expect(page.getByRole('link', { name: 'Open original source' })).toHaveAttribute('href', 'https://example.org/camera');
+  await page.getByRole('button', { name: 'Close detail' }).click();
+  const { id: assetId } = await camera.json();
+  const bridge = await page.request.post('/api/v1/map-assets/' + assetId, {
+    headers: locationOrigin, data: { kind: 'bridge', name: 'Test operator bridge', attribution: 'Test operator',
+      latitude: stored.latitude, longitude: stored.longitude, source_url: 'https://example.org/bridge',
+      notice: { direction: 'northbound', status: 'closed', source_url: 'https://example.org/notice',
+        expires_at: new Date(Date.now() + 3600000).toISOString() } },
+  });
+  expect(bridge.ok()).toBe(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Return to area' }).click();
+  await expect(operationsMap).toHaveAttribute('data-map-ready', 'true', { timeout: 30000 });
+  await operationsMap.locator('canvas').click();
+  await expect(page.getByText('Northbound · closed')).toBeVisible();
+  await expect(page.getByText('Southbound · Unknown')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Official notice' })).toHaveAttribute('href', 'https://example.org/notice');
+  await page.getByRole('button', { name: 'Close detail' }).click();
+  await page.getByRole('button', { name: /^Incidents ·/ }).click();
   await page.getByRole('button', { name: 'Global' }).click();
   await expect(page.getByRole('button', { name: 'Global' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('SIMULATED TEST EVENT (far)')).toHaveCount(1);
@@ -119,15 +159,23 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await page.getByRole('button', { name: 'News', exact: true }).click();
   await expect(page.getByRole('button', { name: /SIMULATED TEST HEADLINE/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /SIMULATED TEST WILDFIRE/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close feed' }).click();
+  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  const wide = await page.locator('.terrain').boundingBox();
+  expect(wide.height).toBeGreaterThan(1440 * 0.85);
+  await page.getByRole('button', { name: 'Return to area' }).click();
+  await expect(operationsMap).toHaveAttribute('data-map-ready', 'true', { timeout: 30000 });
+  if (process.env.SITREP_SCREENSHOTS) await page.screenshot({ path: process.env.SITREP_SCREENSHOTS + '/map-first-1440.png' });
   await page.setViewportSize({ width: 1024, height: 768 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
-  if (process.env.SITREP_SCREENSHOTS) await page.screenshot({ path: process.env.SITREP_SCREENSHOTS + '/tablet.png' });
+  if (process.env.SITREP_SCREENSHOTS) await page.screenshot({ path: process.env.SITREP_SCREENSHOTS + '/map-first-tablet.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('heading', { name: 'Operational map' })).toBeVisible();
   await expect(page.locator('body')).toHaveCSS('overflow-x', 'visible');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
-  if (process.env.SITREP_SCREENSHOTS) await page.screenshot({ path: process.env.SITREP_SCREENSHOTS + '/phone.png', fullPage: true });
+  if (process.env.SITREP_SCREENSHOTS) await page.screenshot({ path: process.env.SITREP_SCREENSHOTS + '/map-first-phone.png', fullPage: true });
   const headers = { Origin: new URL(page.url()).origin };
   const viewer = { username: 'test-viewer', password: 'synthetic-viewer-password' };
   const created = await page.request.post('/api/v1/accounts', { data: viewer, headers });

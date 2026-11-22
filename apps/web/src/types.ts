@@ -15,6 +15,9 @@ export type Incident = {
   description: string; occurred_at: string; updated_at: string; expires_at: string;
   latitude: number | null; longitude: number | null; severity: number;
   official: boolean; district: string | null; source_url: string;
+  road?: string | null; original_source?: string | null; event_status?: string | null;
+  delay_seconds?: number | null; direction_from?: string | null; direction_to?: string | null;
+  reported_at?: string | null; line?: [number, number][] | null;
   magnitude: number | null; depth_km: number | null; forecast_date: string | null;
 };
 
@@ -41,3 +44,12 @@ export async function api<T>(path: string, body?: object, method = body ? 'POST'
   }
   return response.json() as Promise<T>;
 }
+
+export type MapAsset = {
+  id: number; kind: 'bridge' | 'road_watch' | 'camera'; name: string; latitude: number; longitude: number;
+  source_url: string; attribution: string; enabled: boolean; road?: string | null;
+  camera_type: 'external' | 'snapshot' | 'hls' | 'iframe' | 'youtube'; media_url?: string | null;
+  refresh_seconds: number; licensing?: string | null;
+  notice?: { direction: 'both' | 'northbound' | 'southbound'; status: 'restricted' | 'closed';
+    source_url: string; expires_at: string } | null;
+};

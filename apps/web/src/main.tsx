@@ -1,9 +1,11 @@
-import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OperationalMap, incidentKey } from './map';
-import { ApiError, api, type Incident, type Location, type Provider, type User } from './types';
+import { ApiError, api, type Incident, type Location, type MapAsset, type Provider, type User } from './types';
 import { LocationPicker } from './location-picker';
+import { layers, operationalCategories, distanceKm } from './layers';
+import { AssetEditor, CameraView } from './assets';
 import './style.css';
 
 const client = new QueryClient({ defaultOptions: { queries: {
@@ -28,8 +30,9 @@ const modes = ['normal', 'weather', 'emergency', 'aviation', 'maritime', 'traffi
 type Mode = typeof modes[number];
 const categories = {
   weather: ['weather_warning', 'weather_observation', 'weather_forecast'],
+  traffic: ['traffic', 'road_accident', 'road_closure', 'roadworks', 'road_weather'],
   emergency: ['earthquake', 'weather_warning', 'wildfire', 'natural_incident'],
-  aviation: ['aircraft'], maritime: ['vessel'], traffic: ['traffic'], news: ['news'],
+  aviation: ['aircraft'], maritime: ['vessel'], news: ['news'],
 };
 const unsupported = new Set<Mode>(['aviation', 'maritime', 'traffic']);
 const severity = ['Information', 'Routine', 'Important', 'High', 'Critical'];
@@ -146,7 +149,32 @@ function Dashboard({ user }: { user: User }) {
   const [mode, setMode] = useState<Mode>('normal');
   const [areaId, setArea] = useState<number>();
   const [minimum, setMinimum] = useState(0);
-  const [layer, setLayer] = useState(true);
+  const [hiddenLayers, setHiddenLayers] = useState<string[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem('sitrep-hidden-layers') ?? '[]');
+      return Array.isArray(saved) ? saved.filter((value): value is string => typeof value === 'string') : [];
+    } catch { return []; }
+  });
+  const [flow, setFlow] = useState(localStorage.getItem('sitrep-traffic-flow') === 'true');
+  const [opacity, setOpacity] = useState(() => {
+    const stored = Number(localStorage.getItem('sitrep-traffic-opacity'));
+    return stored >= .2 && stored <= 1 ? stored : .75;
+  });
+  useEffect(() => {
+    localStorage.setItem('sitrep-traffic-flow', String(flow));
+    localStorage.setItem('sitrep-traffic-opacity', String(opacity));
+  }, [flow, opacity]);
+  const [showLayers, setShowLayers] = useState(false);
+  const [showFeed, setShowFeed] = useState(false);
+  const [mapOnly, setMapOnly] = useState(false);
+  const [headlines, setHeadlines] = useState(false);
+  const [showStatus, setShowStatus] = useState(false);
+  const [radiusOverride, setRadiusOverride] = useState(0);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [providerFilter, setProviderFilter] = useState('');
+  const [freshness, setFreshness] = useState(0);
+  const [focus, setFocus] = useState<{ target: 'area' | 'events'; revision: number }>();
+  useEffect(() => { localStorage.setItem('sitrep-hidden-layers', JSON.stringify(hiddenLayers)); }, [hiddenLayers]);
   const [selectedId, setSelected] = useState('');
   const [settings, setSettings] = useState(false);
   const [editAreaId, setEditAreaId] = useState<number>();
@@ -171,12 +199,16 @@ function Dashboard({ user }: { user: User }) {
   }, [kiosk, rotate, settings]);
   const areas = useQuery({ queryKey: ['locations'], queryFn: () => api<Location[]>('/locations') });
   const area = areas.data?.find(item => item.id === areaId) ?? areas.data?.find(item => item.is_primary) ?? areas.data?.[0];
+  const mapArea = area && (radiusOverride ? { ...area, radius: radiusOverride } : area);
   const editedArea = areas.data?.find(item => item.id === editAreaId);
   const dictionary = labels[area?.language ?? 'en'];
   const global = mode === 'global' || mode === 'news';
-  const modeCategories = mode in categories ? categories[mode as keyof typeof categories] : [];
+  const modeCategories = mode in categories ? categories[mode as keyof typeof categories] : operationalCategories;
   const query = new URLSearchParams({ severity: String(minimum), limit: '500' });
-  if (area && !global) query.set('location_id', String(area.id));
+  if (area && !global) {
+    query.set('location_id', String(area.id));
+    if (radiusOverride) query.set('radius_km', String(radiusOverride));
+  }
   for (const category of modeCategories) query.append('category', category);
   const events = useQuery({ queryKey: ['events', query.toString()], enabled: !!area || global,
     queryFn: () => api<Incident[]>('/events?' + query),
@@ -224,7 +256,36 @@ function Dashboard({ user }: { user: User }) {
     }
   }
 
-  const items = events.data ?? empty;
+  const traffic = useQuery({ queryKey: ['traffic-status'], refetchInterval: 15000,
+    queryFn: () => api<{ state: string; last_success: string | null }>('/traffic/status') });
+  const assets = useQuery({ queryKey: ['map-assets', area?.id, global],
+    queryFn: () => api<MapAsset[]>('/map-assets' + (!global && area ? '?location_id=' + area.id : '')) });
+  const registry = useQuery({ queryKey: ['map-assets', 'admin'], enabled: settings && user.role === 'admin',
+    queryFn: () => api<MapAsset[]>('/map-assets') });
+  const canFlow = ['online', 'unverified', 'unavailable'].includes(traffic.data?.state ?? '');
+  const registryMarkers = useMemo<Incident[]>(() => (assets.data ?? []).filter(asset => asset.enabled).map(asset => ({
+    provider: 'map-registry', external_id: String(asset.id), category: asset.kind, title: asset.name,
+    description: '', latitude: asset.latitude, longitude: asset.longitude, source_url: asset.source_url,
+    official: false, district: null, severity: asset.notice?.status === 'closed' ? 3 : asset.notice ? 2 : 0,
+    occurred_at: '', updated_at: '', expires_at: '', magnitude: null, depth_km: null, forecast_date: null,
+  })), [assets.data]);
+  const items = useMemo(() => (events.data ?? empty).filter(item => (!providerFilter || item.provider === providerFilter) && (!statusFilter || item.event_status === statusFilter) &&
+    (!freshness || Date.parse(item.reported_at ?? item.updated_at) >= Date.now() - freshness * 3600000)), [events.data, providerFilter, freshness, statusFilter]);
+  const visible = useMemo(() => items.filter(item => !hiddenLayers.includes(item.category)), [items, hiddenLayers]);
+  const configured = (values: readonly string[]) => providers.data?.some(source =>
+    !['DISABLED', 'NEEDS_KEY'].includes(source.state) && (values.includes(source.category) ||
+      (source.category === 'traffic' && values.some(value => value.startsWith('road_') && value !== 'road_watch')) ||
+      (source.id === 'nasa-eonet' && values.includes('wildfire'))));
+  const fit = (target: 'area' | 'events') => setFocus(previous => ({ target, revision: (previous?.revision ?? 0) + 1 }));
+  const mapItems = useMemo(() => [...visible.filter(item => !['weather_observation', 'weather_forecast'].includes(item.category)),
+    ...registryMarkers.filter(item => !hiddenLayers.includes(item.category))], [visible, registryMarkers, hiddenLayers]);
+  const selectedAsset = assets.data?.find(asset => 'map-registry:' + asset.id === selectedId);
+  const segment = useQuery({
+    queryKey: ['segment', selectedAsset?.id], enabled: !!selectedAsset && selectedAsset.kind !== 'camera',
+    queryFn: () => api<{ currentSpeed: number | null; freeFlowSpeed: number | null;
+      currentTravelTime: number | null; freeFlowTravelTime: number | null; confidence: number | null;
+      checked_at: string } | null>(`/map-assets/${selectedAsset?.id}/traffic`), refetchInterval: 60000,
+  });
   const selected = items.find(item => incidentKey(item) === selectedId);
   const eventLookup = selected && new URLSearchParams({ provider: selected.provider, external_id: selected.external_id });
   const alertStatus = useQuery({
@@ -279,6 +340,7 @@ function Dashboard({ user }: { user: User }) {
     } catch (reason) { setMessage(String(reason)); }
   }
   const select = (event: Incident) => setSelected(incidentKey(event));
+  const selectFeed = (event: Incident) => { select(event); if (window.innerWidth <= 680) setShowFeed(false); };
   const date = (value: string) => new Intl.DateTimeFormat(area?.language ?? 'en', {
     dateStyle: 'medium', timeStyle: 'short', timeZone: area?.timezone ?? 'UTC',
   }).format(new Date(value));
@@ -337,7 +399,7 @@ function Dashboard({ user }: { user: User }) {
       <Brand />
       <span className="command-mode">{dictionary[mode]}</span>
       <label className="area-selector"><span>{dictionary.area}</span><select aria-label={dictionary.area}
-        value={area?.id ?? ''} onChange={event => { setArea(Number(event.target.value)); setSelected(''); }}>
+        value={area?.id ?? ''} onChange={event => { setArea(Number(event.target.value)); setRadiusOverride(0); setSelected(''); }}>
         {!area && <option value="">—</option>}
         {areas.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>
@@ -351,11 +413,12 @@ function Dashboard({ user }: { user: User }) {
         <span>{area?.timezone ?? 'UTC'}</span></div>
       {utc && <div className="clock"><Clock zone="UTC" language="en" /><span>UTC</span></div>}
       <button type="button" aria-pressed={kiosk} onClick={toggleKiosk}>{kiosk ? 'Exit kiosk' : 'Kiosk'}</button>
+      <button type="button" aria-pressed={mapOnly} onClick={() => setMapOnly(!mapOnly)}>{mapOnly ? 'Operations view' : 'Map only'}</button>
       <button type="button" aria-expanded={settings} onClick={() => { if (!settings || window.confirm('Close settings and discard any unsaved changes?')) setSettings(!settings); }}>{dictionary.settings}</button>
     </header>
-    <nav aria-label="Dashboard modes" className="modes">{modes.map(item =>
+    {!mapOnly && <nav aria-label="Dashboard modes" className="modes">{modes.map(item =>
       <button key={item} type="button" aria-pressed={item === mode}
-        onClick={() => { setMode(item); setSelected(''); }}>{dictionary[item]}</button>)}</nav>
+        onClick={() => { setMode(item); setSelected(''); }}>{dictionary[item]}</button>)}</nav>}
     {settings && <section className="settings panel">
       <div className="panel-heading"><h2>{dictionary.settings}</h2>
         <div className="area-actions">
@@ -394,6 +457,8 @@ function Dashboard({ user }: { user: User }) {
           </div>}
           <button className="primary-button">{editedArea ? 'Save monitoring area' : 'Add monitoring area'}</button>
         </form>
+        <AssetEditor assets={registry.data ?? []}
+          refresh={() => { void cache.invalidateQueries({ queryKey: ['map-assets'] }); }} />
         <form onSubmit={createViewer}>
           <h3>Create viewer account</h3>
           <div className="form-grid">
@@ -430,34 +495,71 @@ function Dashboard({ user }: { user: User }) {
     </section>}
     {message && <p role="alert" className="error">{message}</p>}
     <main className="workspace">
-      <section className="panel feed">
-        <div className="panel-heading"><h2>{dictionary.feed}</h2><span className="count">{items.length}</span></div>
+      <section className="terrain">
+        <h1 className="sr-only">{dictionary.map}</h1>
+        <OperationalMap location={mapArea} incidents={mapItems} trafficOpacity={flow && canFlow ? opacity : undefined} select={select} focus={focus}
+          selectedId={selectedId} reduceMotion={reduce} global={global} label={dictionary.map} />
+      </section>
+      <div className="map-command">
+        {!mapOnly && <>
+          <button aria-expanded={showLayers} onClick={() => setShowLayers(!showLayers)}>Layers</button>
+          <button aria-expanded={showFeed} onClick={() => setShowFeed(!showFeed)}>Incidents · {visible.length}</button>
+          <button aria-expanded={showStatus} onClick={() => setShowStatus(!showStatus)}>Source status</button>
+        </>}
+        <button disabled={!area} onClick={() => { if (global) setMode('normal'); fit('area'); }}>Return to area</button>
+        {!mapOnly && <button disabled={!mapItems.some(item => item.latitude != null)} onClick={() => fit('events')}>Fit incidents</button>}
+        {!mapOnly && !global && area && <span>{mapArea?.radius} km radius</span>}
+      </div>
+      {!mapOnly && showLayers && <section className="panel overlay layer-menu" aria-label="Operational layers">
+        <div className="panel-heading"><h2>Operational layers</h2><button onClick={() => { setHiddenLayers([]); setFlow(false); setOpacity(.75); }}>Reset</button></div>
+        <label className="layer-option"><input type="checkbox" checked={flow && canFlow} disabled={!canFlow}
+          onChange={event => setFlow(event.target.checked)} /><span>Traffic Flow</span>
+          <small>{traffic.data?.state.replaceAll('_', ' ') ?? 'Checking'}{traffic.data?.last_success ? ' · ' + date(traffic.data.last_success) : ''}</small></label>
+        {flow && canFlow && <label className="layer-option">Opacity<input type="range" min=".2" max="1" step=".05"
+          value={opacity} onChange={event => setOpacity(Number(event.target.value))} /></label>}
+        {layers.map(([name, values]) => <label className="layer-option" key={name}>
+          <input type="checkbox" checked={values.every(value => !hiddenLayers.includes(value))}
+            onChange={event => setHiddenLayers(current => event.target.checked
+              ? current.filter(value => !(values as readonly string[]).includes(value))
+              : [...new Set([...current, ...values])])} />
+          <span>{name}</span><small>{[...items, ...registryMarkers].some(item => (values as readonly string[]).includes(item.category))
+            ? 'In view' : configured(values) ? 'Configured' : 'Not configured'}</small>
+        </label>)}
+      </section>}
+      {!mapOnly && showFeed && <section className="panel overlay feed">
+        <div className="panel-heading"><h2>{dictionary.feed}</h2><span className="count">{visible.length}</span><button onClick={() => setShowFeed(false)}>Close feed</button></div>
         <label className="filter"><span>Priority</span><select value={minimum} onChange={event => setMinimum(Number(event.target.value))}>
           <option value="0">All priorities</option><option value="2">Important and higher</option>
           <option value="3">High and critical</option><option value="4">Critical only</option>
         </select></label>
-        {unsupported.has(mode) ? <p className="empty">{dictionary.unavailable}</p> :
+        {!global && <label className="filter">Radius<select value={radiusOverride}
+          onChange={event => setRadiusOverride(Number(event.target.value))}>
+          <option value="0">Saved area radius</option>
+          {[15, 25, 50, 100, 150].map(km => <option key={km} value={km}>{km} km</option>)}
+        </select></label>}
+        <label className="filter">Status<select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+          <option value="">Any reported status</option><option value="active">Active</option><option value="present">Present</option>
+        </select></label>
+        <label className="filter">Provider<select value={providerFilter} onChange={event => setProviderFilter(event.target.value)}>
+          <option value="">All providers</option>{providers.data?.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
+        </select></label>
+        <label className="filter">Freshness<select value={freshness} onChange={event => setFreshness(Number(event.target.value))}>
+          <option value="0">All current records</option><option value="1">Last hour</option><option value="6">Last 6 hours</option>
+        </select></label>
+        {unsupported.has(mode) && !visible.length && !configured(modeCategories) ? <p className="empty">{dictionary.unavailable}</p> :
           connectionError && !events.data ? <p className="empty" role="status">{dictionary.retry}</p> :
           events.isPending ? <p className="empty" role="status">{dictionary.checking}</p> :
-          !items.length ? <p className="empty">{dictionary.empty}</p> :
-          <ul className="event-list">{items.map(item => <li key={incidentKey(item)}>
-            <button onClick={() => select(item)} aria-pressed={incidentKey(item) === selectedId}>
+          !visible.length ? <p className="empty">{dictionary.empty}</p> :
+          <ul className="event-list">{visible.map(item => <li key={incidentKey(item)}>
+            <button onClick={() => selectFeed(item)} aria-pressed={incidentKey(item) === selectedId}>
               <span className={'priority level-' + item.severity}>{severity[item.severity]}</span>
               <strong>{item.title}</strong>
               <span>{item.district ?? (item.latitude !== null && item.longitude !== null
                 ? `${item.latitude.toFixed(2)}°, ${item.longitude.toFixed(2)}°` : '—')} · {item.official ? 'Official source' : 'Reported'}</span>
               <span>{item.provider} · {item.forecast_date ?? date(item.occurred_at)}</span>
             </button></li>)}</ul>}
-      </section>
-      <section className="panel terrain">
-        <div className="panel-heading"><h1>{dictionary.map}</h1><label className="layer"><input
-          type="checkbox" checked={layer} onChange={event => setLayer(event.target.checked)} /> Event markers</label></div>
-        <OperationalMap location={area} incidents={layer ? items : empty} select={select} selectedId={selectedId} reduceMotion={reduce} global={global} label={dictionary.map} />
-        <div className="map-info"><span>{global ? dictionary.global : area ?
-          area.latitude.toFixed(3) + '°, ' + area.longitude.toFixed(3) + '°' : '—'}</span>
-          <span>{!global && area && (area.units === 'metric' ? area.radius + ' km' : (area.radius * 0.621371).toFixed(1) + ' mi')}</span></div>
-      </section>
-      <aside className="side">
+      </section>}
+      {!mapOnly && <aside className="overlay weather-overlay">
         <section className="panel weather-intelligence">
           <div className="panel-heading"><h2>Weather intelligence</h2></div>
           <div className="details">
@@ -466,21 +568,25 @@ function Dashboard({ user }: { user: User }) {
             {forecast && <p>{forecast.forecast_date} · {forecast.description}</p>}
           </div>
         </section>
-        <section className="panel summary">
-          <div className="panel-heading"><h2>{dictionary.warning}</h2></div>
-          <strong>{events.data ? items.filter(event => event.category === 'weather_warning' &&
-            Date.parse(event.occurred_at) <= Date.now()).length : '—'}</strong>
-          <span className="muted">In the current view</span>
-        </section>
-        <section className="panel">
-          <div className="panel-heading"><h2>{dictionary.observer}</h2></div>
+      </aside>}
+      {selected && <aside className="panel overlay detail-overlay">
+        <div className="panel-heading"><h2>{dictionary.observer}</h2><button onClick={() => setSelected('')}>Close detail</button></div>
           {selected ? <div className="details">
             <span className={'priority level-' + selected.severity}>{severity[selected.severity]}</span>
             <h3>{selected.title}</h3><p>{selected.description}</p>
             {selected.district && <p>District {selected.district} · Approximate area</p>}
             {selected.magnitude !== null && <p>Magnitude {selected.magnitude}</p>}
             {selected.depth_km !== null && <p>Depth {selected.depth_km.toFixed(1)} km</p>}
-            <p>{selected.forecast_date ?? date(selected.occurred_at)}</p>
+            <p>{selected.category.replaceAll('_', ' ')} · {selected.forecast_date ?? date(selected.occurred_at)}</p>
+            <p>Updated {date(selected.reported_at ?? selected.updated_at)}</p>
+            {selected.road && <p>Road {selected.road}</p>}
+            {selected.original_source && <p>Reported by {selected.original_source}</p>}
+            {selected.provider === 'transito-agora' && <a href="https://transitoagora.pt" target="_blank" rel="noreferrer">Dados: Trânsito Agora</a>}
+            {selected.delay_seconds != null && <p>Reported delay {Math.round(selected.delay_seconds / 60)} min</p>}
+            {selected.event_status && <p>Status {selected.event_status}</p>}
+            {(selected.direction_from || selected.direction_to) && <p>{selected.direction_from ?? 'Unknown'} → {selected.direction_to ?? 'Unknown'}</p>}
+            {area && selected.latitude != null && selected.longitude != null &&
+              <p>{distanceKm(area, { latitude: selected.latitude, longitude: selected.longitude }).toFixed(1)} km from monitoring centre</p>}
             <a href={selected.source_url} target="_blank" rel="noreferrer">Source · {selected.provider}</a>
             {alertStatus.data?.acknowledged_at ? <p>Acknowledged · {date(alertStatus.data.acknowledged_at)}</p> :
               alertStatus.data?.eligible && <button onClick={() => void acknowledge(selected)}>Acknowledge alert</button>}
@@ -492,25 +598,54 @@ function Dashboard({ user }: { user: User }) {
               </li>)}</ul>
             </>}
           </div> : <p className="empty">{dictionary.select}</p>}
-        </section>
-        <section className="panel">
+      </aside>}
+      {selectedAsset && <aside className="panel overlay detail-overlay">
+        <div className="panel-heading"><h2>{selectedAsset.name}</h2><button onClick={() => setSelected('')}>Close detail</button></div>
+        <div className="details">
+          {selectedAsset.kind === 'camera' ? <CameraView key={selectedAsset.id} asset={selectedAsset} /> : <>
+            <p>Road {selectedAsset.road || 'Not available'} · {selectedAsset.attribution}</p>
+            <p>Overall status {selectedAsset.notice?.status ?? 'Unknown'}</p>
+            {(['northbound', 'southbound'] as const).map(direction => <p key={direction}>
+              {direction === 'northbound' ? 'Northbound' : 'Southbound'} · {
+                selectedAsset.notice && ['both', direction].includes(selectedAsset.notice.direction)
+                  ? selectedAsset.notice.status : 'Unknown'}
+            </p>)}
+            {segment.data ? <>
+              <p>Nearest reported segment · direction unverified</p>
+              <p>Current speed {segment.data.currentSpeed ?? 'Not available'} · Free-flow speed {segment.data.freeFlowSpeed ?? 'Not available'} km/h</p>
+              <p>Delay {segment.data.currentTravelTime != null && segment.data.freeFlowTravelTime != null
+                ? Math.max(0, segment.data.currentTravelTime - segment.data.freeFlowTravelTime) + ' s' : 'Not available'}</p>
+              <p>Confidence {segment.data.confidence ?? 'Not available'} · Checked {date(segment.data.checked_at)}</p>
+            </> : <p>Current speed, free-flow speed and delay · Not available for this asset</p>}
+            {selectedAsset.notice && <a href={selectedAsset.notice.source_url} target="_blank" rel="noreferrer">Official notice</a>}
+            <a href={selectedAsset.source_url} target="_blank" rel="noreferrer">Open operator source</a>
+            {(assets.data ?? []).filter(camera => camera.enabled && camera.kind === 'camera' && distanceKm(camera, selectedAsset) < 8)
+              .map(camera => <button key={camera.id} onClick={() => setSelected('map-registry:' + camera.id)}>{camera.name}</button>)}
+            {items.filter(item => item.road && selectedAsset.road && item.road.split(',').some(road => road.trim() === selectedAsset.road))
+              .map(item => <button key={incidentKey(item)} onClick={() => select(item)}>Road report · {item.title}</button>)}
+          </>}
+        </div>
+      </aside>}
+      {!mapOnly && showStatus && <section className="panel overlay status-overlay">
           <div className="panel-heading"><h2>{dictionary.network}</h2></div>
           {providers.data ? <ul className="providers">{providers.data.map(provider =>
             <li key={provider.id}><div><a href={provider.docs} target="_blank" rel="noreferrer">{provider.name}</a>
               <span className={'provider-state ' + provider.state.toLowerCase()}>{provider.state}</span></div>
               <small>{provider.succeeded_at ? date(provider.succeeded_at) : 'No successful fetch recorded'}</small>
             </li>)}</ul> : <p className="empty">{providers.isError ? dictionary.retry : dictionary.checking}</p>}
-        </section>
-      </aside>
+      </section>}
+      {mapItems.some(item => item.provider === 'tomtom-incidents') && <a className="tomtom-credit"
+        href="https://www.tomtom.com/legal/" target="_blank" rel="noreferrer">© TomTom</a>}
+      {mapItems.some(item => item.provider === 'transito-agora') && <a className="traffic-credit"
+        href="https://transitoagora.pt" target="_blank" rel="noreferrer">Dados: Trânsito Agora</a>}
+      {!mapOnly && <button className="headline-toggle" aria-expanded={headlines} onClick={() => setHeadlines(!headlines)}>Headlines</button>}
     </main>
-    <div className="intelligence-strip" aria-label="Latest headlines">
+    {!mapOnly && headlines && <div className="intelligence-strip" aria-label="Latest headlines">
       <strong>HEADLINES</strong>
       {news.data?.map(item => <a key={incidentKey(item)} href={item.source_url} target="_blank" rel="noreferrer">{item.title}</a>)}
       {news.isError && <span>News unavailable</span>}
       {news.data?.length === 0 && <span>No recent headlines</span>}
-    </div>
-    <footer><span>Civilian monitoring · Consult official channels for emergency instructions</span>
-      <span>{events.dataUpdatedAt > 0 && 'Dashboard refreshed · ' + date(new Date(events.dataUpdatedAt).toISOString())}</span></footer>
+    </div>}
   </div>;
 }
 

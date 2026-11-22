@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as maplibre from 'maplibre-gl';
-import { type GeoJSONSource, type Map as MapInstance } from 'maplibre-gl';
+import { type GeoJSONSource, type RasterTileSource, type Map as MapInstance } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Incident } from './types';
 import { mapStyles, offlineStyle, resourceName } from './map-provider';
@@ -25,9 +25,15 @@ function ring(location: MapArea, worldCopy: number): number[][] {
   });
 }
 
-export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion }: {
+function fitArea(map: MapInstance, area: MapArea) {
+  const bounds = new maplibre.LngLatBounds();
+  for (const [longitude, latitude] of ring(area, 0)) bounds.extend([longitude, Math.max(-85, Math.min(85, latitude))]);
+  map.fitBounds(bounds, { padding: 65, maxZoom: 15, duration: 0 });
+}
+
+export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion, focus, trafficOpacity }: {
   location?: MapArea; incidents: Incident[]; select?: (event: Incident) => void;
-  global: boolean; label: string; pick?: (point: Point) => void; selectedId?: string; reduceMotion?: boolean;
+  global: boolean; label: string; pick?: (point: Point) => void; selectedId?: string; reduceMotion?: boolean; focus?: { target: 'area' | 'events'; revision: number }; trafficOpacity?: number;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<MapInstance | null>(null);
@@ -58,6 +64,7 @@ export function OperationalMap({ location, incidents, select, global, label, pic
         center: camera.current?.center ?? [0, 20],
         zoom: camera.current?.zoom ?? 1.4,
         maxZoom: 18,
+        renderWorldCopies: false,
         attributionControl: { compact: false },
       });
     } catch {
@@ -71,7 +78,10 @@ export function OperationalMap({ location, incidents, select, global, label, pic
     const loadTimeout = window.setTimeout(() => {
       if (!loaded) setFailure('The basemap did not finish loading.');
     }, 15000);
-    instance.on('error', ({ error }) => {
+    instance.on('error', event => {
+      if ('sourceId' in event && event.sourceId === 'traffic-flow') return;
+      const { error } = event;
+      if (error.message.includes('/api/v1/traffic/tiles/')) return;
       const resource = resourceName(error.message);
       setDiagnostic(`Map resource failed · ${resource}`);
       setFailure(loaded ? `Some basemap resources failed at ${resource}.` : `Could not load the basemap from ${resource}.`);
@@ -91,19 +101,48 @@ export function OperationalMap({ location, incidents, select, global, label, pic
       setFailure('');
       instance.addSource('range', { type: 'geojson', data: empty });
       instance.addLayer({ id: 'range-area', source: 'range', type: 'fill',
-        paint: { 'fill-color': '#43bdda', 'fill-opacity': 0.1 } });
+        paint: { 'fill-color': '#43bdda', 'fill-opacity': 0.055 } });
       instance.addLayer({ id: 'range-outline', source: 'range', type: 'line',
         paint: { 'line-color': '#43bdda', 'line-width': 2, 'line-dasharray': [3, 2] } });
-      instance.addSource('incidents', { type: 'geojson', cluster: true, clusterRadius: 42, data: empty });
+      instance.addSource('incidents', { type: 'geojson', cluster: true, clusterRadius: 42, data: empty,
+        clusterProperties: { highest: ['max', ['get', 'severity']] } });
       instance.addLayer({ id: 'event-clusters', source: 'incidents', type: 'circle',
         filter: ['has', 'point_count'],
-        paint: { 'circle-radius': 13, 'circle-color': '#19495b', 'circle-stroke-color': '#7bd5e7', 'circle-stroke-width': 2 } });
+        paint: { 'circle-radius': 15, 'circle-color': ['case', ['>=', ['get', 'highest'], 2], '#9b582d', '#236177'],
+          'circle-stroke-color': ['case', ['>=', ['get', 'highest'], 2], '#ffd09b', '#a8f1ff'], 'circle-stroke-width': 2 } });
+      if (instance.getStyle().glyphs) instance.addLayer({
+        id: 'cluster-counts', source: 'incidents', type: 'symbol', filter: ['has', 'point_count'],
+        layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Regular'], 'text-size': 13, 'text-allow-overlap': true },
+        paint: { 'text-color': '#ffffff' },
+      });
       instance.addLayer({ id: 'event-points', source: 'incidents', type: 'circle',
         filter: ['!', ['has', 'point_count']],
-        paint: { 'circle-radius': ['case', ['boolean', ['get', 'selected'], false], 11, 6], 'circle-stroke-color': '#0a111b', 'circle-stroke-width': 2,
+        paint: { 'circle-radius': ['case', ['boolean', ['get', 'selected'], false], 13, 9], 'circle-stroke-color': '#0a111b', 'circle-stroke-width': 2,
           'circle-color': ['match', ['get', 'severity'], 1, colors[1], 2, colors[2],
             3, colors[3], 4, colors[4], colors[0]] } });
-      instance.on('click', 'event-points', (event) => {
+      const symbols = { fire: '▲', earthquake: 'ϟ', traffic: '!', camera: '◉', bridge: '═', weather: '◆', other: '•' };
+      for (const [id, glyph] of Object.entries(symbols)) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+        ctx.font = 'bold 21px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#10212a'; ctx.fillText(glyph, 16, 16);
+        instance.addImage('kind-' + id, ctx.getImageData(0, 0, 32, 32), { pixelRatio: 2 });
+      }
+      instance.addLayer({ id: 'event-kinds', source: 'incidents', type: 'symbol',
+        filter: ['!', ['has', 'point_count']], layout: { 'icon-image': ['concat', 'kind-', ['get', 'kind']],
+          'icon-allow-overlap': true } });
+      instance.addSource('map-assets', { type: 'geojson', data: empty });
+      instance.addSource('incident-lines', { type: 'geojson', data: empty });
+      instance.addLayer({ id: 'incident-lines', type: 'line', source: 'incident-lines',
+        paint: { 'line-color': '#ff715e', 'line-width': 4, 'line-opacity': .8 } }, 'event-points');
+      instance.addLayer({ id: 'asset-points', type: 'circle', source: 'map-assets',
+        paint: { 'circle-radius': 10, 'circle-color': ['case', ['>=', ['get', 'severity'], 2], '#ff8b72', '#80dce8'],
+          'circle-stroke-color': '#112431', 'circle-stroke-width': 2 } });
+      instance.addLayer({ id: 'asset-kinds', type: 'symbol', source: 'map-assets',
+        layout: { 'icon-image': ['concat', 'kind-', ['get', 'kind']], 'icon-allow-overlap': true } });
+      instance.on('click', ['event-points', 'incident-lines', 'asset-points'], (event) => {
         const key = event.features?.[0]?.properties?.key;
         const selected = selection.current.incidents.find((item) => incidentKey(item) === key);
         if (selected) selection.current.select?.(selected);
@@ -159,10 +198,9 @@ export function OperationalMap({ location, incidents, select, global, label, pic
     if (!ready || !map.current) return;
     if (location && !global && (!light || map.current.getZoom() < 2 ||
         !map.current.getBounds().contains([location.longitude, location.latitude]))) {
-      map.current.jumpTo({ center: [location.longitude, location.latitude],
-        zoom: Math.max(2, Math.min(14, Math.log2(7500 / location.radius))) });
+      fitArea(map.current, location);
     } else if (!light) map.current.jumpTo({ center: [0, 20], zoom: 1.4 });
-  }, [ready, location?.latitude, location?.longitude, global, light]);
+  }, [ready, location?.latitude, location?.longitude, location?.radius, global, light]);
 
   useEffect(() => {
     const event = incidents.find(item => incidentKey(item) === selectedId);
@@ -173,14 +211,63 @@ export function OperationalMap({ location, incidents, select, global, label, pic
 
   useEffect(() => {
     if (!ready || !map.current) return;
+    const features = incidents.flatMap(event => event.latitude === null || event.longitude === null ? [] : [{
+      type: 'Feature' as const, properties: { key: incidentKey(event), provider: event.provider,
+        kind: event.category === 'road_watch' ? 'bridge' : event.category.startsWith('road_') ? 'traffic' :
+          ['wildfire', 'fire_detection'].includes(event.category) ? 'fire' :
+          event.category === 'weather_warning' ? 'weather' :
+          ['traffic', 'camera', 'bridge', 'earthquake'].includes(event.category) ? event.category : 'other',
+        severity: event.severity, selected: incidentKey(event) === selectedId },
+      geometry: { type: 'Point' as const, coordinates: [event.longitude, event.latitude] },
+    }]);
     (map.current.getSource('incidents') as GeoJSONSource).setData({
-      type: 'FeatureCollection',
-      features: incidents.flatMap((event) => event.latitude === null || event.longitude === null ? [] : [{
-        type: 'Feature', properties: { key: incidentKey(event), severity: event.severity, selected: incidentKey(event) === selectedId },
-        geometry: { type: 'Point', coordinates: [event.longitude, event.latitude] },
-      }]),
+      type: 'FeatureCollection', features: features.filter(feature => feature.properties.provider !== 'map-registry'),
+    });
+    (map.current.getSource('map-assets') as GeoJSONSource).setData({
+      type: 'FeatureCollection', features: features.filter(feature => feature.properties.provider === 'map-registry'),
+    });
+    (map.current.getSource('incident-lines') as GeoJSONSource).setData({
+      type: 'FeatureCollection', features: incidents.flatMap(event => event.line && event.line.length > 1 ? [{
+        type: 'Feature', properties: { key: incidentKey(event) },
+        geometry: { type: 'LineString', coordinates: event.line },
+      }] : []),
     });
   }, [ready, incidents, selectedId]);
+
+  useEffect(() => {
+    if (!focus || !map.current || !ready) return;
+    if (focus.target === 'area' && location) fitArea(map.current, location);
+    if (focus.target === 'events') {
+      const bounds = new maplibre.LngLatBounds();
+      for (const event of incidents) if (event.longitude != null && event.latitude != null)
+        bounds.extend([event.longitude, event.latitude]);
+      if (!bounds.isEmpty()) map.current.fitBounds(bounds, { padding: 70, maxZoom: 14, duration: 0 });
+    }
+  }, [focus, ready]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!ready || !instance) return;
+    if (trafficOpacity === undefined) {
+      if (instance.getLayer('traffic-flow')) instance.removeLayer('traffic-flow');
+      if (instance.getSource('traffic-flow')) instance.removeSource('traffic-flow');
+      return;
+    }
+    const tileTemplate = () => window.location.origin + '/api/v1/traffic/tiles/{z}/{x}/{y}.png?refresh=' +
+      Math.floor(Date.now() / 60000);
+    if (!instance.getSource('traffic-flow')) {
+      instance.addSource('traffic-flow', {
+        type: 'raster', tiles: [tileTemplate()],
+        tileSize: 256, minzoom: 8, maxzoom: 19, attribution: '© TomTom',
+      });
+      instance.addLayer({ id: 'traffic-flow', type: 'raster', source: 'traffic-flow' }, 'event-clusters');
+    }
+    instance.setPaintProperty('traffic-flow', 'raster-opacity', trafficOpacity);
+    const timer = window.setInterval(() => {
+      (instance.getSource('traffic-flow') as RasterTileSource | undefined)?.setTiles([tileTemplate()]);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [ready, trafficOpacity]);
 
   return <div className="map-frame">
     <div className="map-canvas" ref={element} role="region" aria-label={label} data-map-ready={settled ? "true" : "false"} />

@@ -34,11 +34,11 @@ For restore, use an isolated database and `pg_restore --exit-on-error` with the 
 
 ## Prebuilt images
 
-The [0.2.0 release candidate](https://github.com/wilson-rst5/sitrep/releases/tag/v0.2.0-rc.1) publishes Linux amd64 images. Add these settings to the generated `.env` on the Docker host, replacing the example origin with your HTTPS origin.
+The [0.3.0 release candidate](https://github.com/wilson-rst5/sitrep/releases/tag/v0.3.0-rc.1) publishes Linux amd64 images. Add these settings to the generated `.env` on the Docker host, replacing the example origin with your HTTPS origin.
 
 ```dotenv
-SITREP_CORE_IMAGE=ghcr.io/wilson-rst5/sitrep-core:0.2.0-rc.1
-SITREP_WEB_IMAGE=ghcr.io/wilson-rst5/sitrep-web:0.2.0-rc.1
+SITREP_CORE_IMAGE=ghcr.io/wilson-rst5/sitrep-core:0.3.0-rc.1
+SITREP_WEB_IMAGE=ghcr.io/wilson-rst5/sitrep-web:0.3.0-rc.1
 SITREP_HTTPS_ORIGIN=https://sitrep.example.org
 ```
 
@@ -47,3 +47,5 @@ docker compose -f compose.yaml -f compose.prod.yaml up -d --wait
 ```
 
 Keep the previously deployed image references for rollback and check database migration compatibility before rolling back.
+
+See [traffic intelligence and map assets](traffic-and-map-assets.md) for licensed optional feeds and camera permissions.

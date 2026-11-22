@@ -24,3 +24,12 @@
 - [x] Redesign the operations dashboard and kiosk layout
 - [x] Publish public GitHub repository
 - [x] Publish GHCR images after the release gates pass
+
+## Map-first operations
+
+- [x] Full viewport map, compact overlays and independent category controls
+- [x] Forecast and observation separation from operational incidents
+- [x] Optional traffic, segment and thermal-anomaly adapters
+- [x] Configurable watched assets, directional bridge notices and public camera viewers
+- [ ] Validate licensed feeds with deployment entitlements and obtain live direction-specific bridge sources
+- [ ] Add verified district polygons, wider-area viewport requests and satellite weather/radar
