@@ -1,4 +1,7 @@
 # Changelog
+## Unreleased
+
+- Add quota-aware ADSB.lol and optional OpenSky flight tracking, an independent aviation radius and live aircraft symbols on the operational map.
 
 ## 0.3.0-rc.1
 

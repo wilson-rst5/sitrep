@@ -10,7 +10,7 @@ export const layers = [
   ['Public cameras', ['camera']],
   ['Weather warnings', ['weather_warning']],
   ['Earthquakes', ['earthquake']],
-  ['Aircraft', ['aircraft']],
+  ['Live aircraft', ['aircraft']],
   ['Vessels', ['vessel']],
   ['Satellite / radar', ['radar']],
   ['Geolocated news', ['news']],

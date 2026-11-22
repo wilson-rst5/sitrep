@@ -48,6 +48,7 @@ jobs:
         run: docker compose up --build --wait --wait-timeout 180
         env:
           ENABLED_PROVIDERS: ''
+          ADSBLOL_ENABLED: 'false'
       - name: Publish isolated test fixtures through JetStream
         run: docker compose exec -T collector python - < tests/integration/publish_fixture.py
       - name: Verify authenticated dashboard and mobile layout

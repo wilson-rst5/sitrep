@@ -40,3 +40,5 @@ The versioned REST API starts at `/api/v1/`. Its machine-readable contract is at
 For development and contributions, see [CONTRIBUTING.md](CONTRIBUTING.md) and [testing](docs/testing.md). For source requirements and restrictions, see [data sources](docs/data-sources.md). For deployment problems, see [troubleshooting](docs/troubleshooting.md).
 
 Original SITREP source is licensed under [Apache 2.0](LICENSE). Source data and optional map styles follow their respective providers’ terms.
+
+Live aircraft can be enabled on the operational map. See [Aviation setup, limits and attribution](docs/aviation.md).

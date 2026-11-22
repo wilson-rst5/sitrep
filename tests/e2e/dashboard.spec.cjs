@@ -71,6 +71,28 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Exit kiosk' })).toBeVisible();
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await expect(page.getByText('needs key')).toBeVisible();
+  const observed = Date.now() / 1000;
+  await page.route('**/api/v1/aviation/aircraft', route => route.fulfill({ json: {
+    settings: { enabled: true, radius: 200, primary_provider: 'adsb.lol', fallback: true },
+    scope: { id: stored.id, latitude: 47.2, longitude: -123.2, radius: 200 },
+    providers: [{ provider: 'adsb.lol', state: 'online', interval: 200, succeeded: new Date().toISOString(),
+      attempted: null, retry_at: null, remaining: null, requests_today: 1, request_budget: 450 }],
+    aircraft: [{ id: 'a123b4', latitude: 47.22, longitude: -123.26, callsign: 'E2EFLIGHT',
+      altitude: 3000, speed: 100, heading: 270, vertical_rate: 0, ground: false, category: 'A1',
+      squawk: null, contact: observed, source: 'adsb_icao', accuracy: null,
+      observed, received: observed, age: 0, freshness: 'fresh' }],
+  } }));
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: 'Open aviation mode' }).click();
+  await expect(page.getByLabel('Aircraft list')).toBeVisible();
+  await expect(page.getByText('200 km aviation radius')).toBeVisible();
+  await page.getByRole('button', { name: /E2EFLIGHT/ }).click();
+  await expect(page.getByLabel('Aircraft details').getByText('270 °')).toBeVisible();
+  await page.getByRole('button', { name: 'Close aircraft' }).click();
+  await page.getByLabel('Callsign or ICAO').fill('absent');
+  await expect(page.getByText('No aircraft match the filters.')).toBeVisible();
+  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const quakes = page.getByRole('checkbox', { name: /Earthquakes/ });
   await quakes.uncheck();
   await page.getByRole('button', { name: 'Layers', exact: true }).click();

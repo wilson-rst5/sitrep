@@ -16,6 +16,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from .aviation import settings as aviation_config, snapshot as aviation_snapshot
 from .db import engine, ready
 from .geocoding import Coordinates, Geography, resolve, search_places
 from .providers import DEFAULT_PROVIDERS, PROVIDERS, Event
@@ -577,6 +578,59 @@ def event(provider: str, external_id: str, _user=Depends(require_user)):
 @app.get("/metrics", include_in_schema=False)
 def metrics(_admin=Depends(require_admin)):
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+class AviationSettings(BaseModel):
+    radius: int = Field(ge=25, le=450)
+    enabled: bool
+    primary_provider: Literal["adsb.lol", "opensky"]
+    fallback: bool
+
+
+@api.get("/aviation/aircraft")
+def aircraft(latitude: float | None = Query(None, ge=-90, le=90),
+             longitude: float | None = Query(None, ge=-180, le=180),
+             radius: float | None = Query(None, gt=0, le=450),
+             _user=Depends(require_user)):
+    if any(value is not None for value in (latitude, longitude, radius)) and any(
+            value is None for value in (latitude, longitude, radius)):
+        raise HTTPException(422, "Specify latitude, longitude and radius together")
+    with engine.connect() as conn:
+        return aviation_snapshot(conn, latitude, longitude, radius)
+
+
+@api.get("/aviation/aircraft/{aircraft_id}")
+def aircraft_detail(aircraft_id: str, _user=Depends(require_user)):
+    with engine.connect() as conn:
+        result = aviation_snapshot(conn)
+    for item in result["aircraft"]:
+        if item["id"] == aircraft_id.lower():
+            return item
+    raise HTTPException(404, "No unexpired position for this aircraft")
+
+
+@api.get("/aviation/status")
+@api.get("/aviation/providers")
+def aviation_status(_user=Depends(require_user)):
+    with engine.connect() as conn:
+        return aviation_snapshot(conn)["providers"]
+
+
+@api.get("/aviation/settings")
+def aviation_settings(_user=Depends(require_user)):
+    with engine.connect() as conn:
+        return aviation_config(conn)
+
+
+@api.patch("/aviation/settings")
+def save_aviation_settings(config: AviationSettings, _user=Depends(require_admin)):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE aviation_settings SET radius=:radius, enabled=:enabled,
+              primary_provider=:primary_provider, fallback=:fallback WHERE id=1
+        """), config.model_dump())
+        conn.execute(text("UPDATE event_revisions SET version=version+1 WHERE id=1"))
+    return config
 
 
 app.include_router(api)

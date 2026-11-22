@@ -44,6 +44,11 @@ services:
     <<: *core
     environment:
       <<: *database-environment
+      ADSBLOL_ENABLED: ${ADSBLOL_ENABLED:-true}
+      ADSBLOL_API_KEY: ${ADSBLOL_API_KEY:-}
+      OPENSKY_CLIENT_ID: ${OPENSKY_CLIENT_ID:-}
+      OPENSKY_CLIENT_SECRET: ${OPENSKY_CLIENT_SECRET:-}
+      AVIATION_POLL_SECONDS: ${AVIATION_POLL_SECONDS:-200}
       GEOCODER_SEARCH_URL: ${GEOCODER_SEARCH_URL:-}
       GEOCODER_URL: ${GEOCODER_URL:-}
       GEOCODER_TOKEN: ${GEOCODER_TOKEN:-}
@@ -71,6 +76,11 @@ services:
     command: [python, -m, sitrep.worker, collector]
     environment:
       <<: *database-environment
+      ADSBLOL_ENABLED: ${ADSBLOL_ENABLED:-true}
+      ADSBLOL_API_KEY: ${ADSBLOL_API_KEY:-}
+      OPENSKY_CLIENT_ID: ${OPENSKY_CLIENT_ID:-}
+      OPENSKY_CLIENT_SECRET: ${OPENSKY_CLIENT_SECRET:-}
+      AVIATION_POLL_SECONDS: ${AVIATION_POLL_SECONDS:-200}
       FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
       FIRMS_BBOX: ${FIRMS_BBOX:-}
       TOMTOM_INCIDENTS_ENABLED: ${TOMTOM_INCIDENTS_ENABLED:-false}

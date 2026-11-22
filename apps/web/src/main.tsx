@@ -6,6 +6,7 @@ import { ApiError, api, type Incident, type Location, type MapAsset, type Provid
 import { LocationPicker } from './location-picker';
 import { layers, operationalCategories, distanceKm } from './layers';
 import { AssetEditor, CameraView } from './assets';
+import { AircraftDetails, AviationAdmin, AviationHealth, aircraftKind, type Aviation } from './aviation';
 import './style.css';
 
 const client = new QueryClient({ defaultOptions: { queries: {
@@ -34,7 +35,7 @@ const categories = {
   emergency: ['earthquake', 'weather_warning', 'wildfire', 'natural_incident'],
   aviation: ['aircraft'], maritime: ['vessel'], news: ['news'],
 };
-const unsupported = new Set<Mode>(['aviation', 'maritime', 'traffic']);
+const unsupported = new Set<Mode>(['maritime', 'traffic']);
 const severity = ['Information', 'Routine', 'Important', 'High', 'Critical'];
 const empty: Incident[] = [];
 type AlertRule = { category: string; minimum_severity: number };
@@ -138,6 +139,7 @@ function Dashboard({ user }: { user: User }) {
     stream.onerror = () => setStreamState('retrying');
     const refresh = () => {
       void cache.invalidateQueries({ queryKey: ['events'] });
+      void cache.invalidateQueries({ queryKey: ['aviation'] });
       void cache.invalidateQueries({ queryKey: ['alert-status'] });
       void cache.invalidateQueries({ queryKey: ['related-events'] });
     };
@@ -256,6 +258,46 @@ function Dashboard({ user }: { user: User }) {
     }
   }
 
+  const aviation = useQuery({ queryKey: ['aviation'], refetchInterval: 15000,
+    queryFn: () => api<Aviation>('/aviation/aircraft') });
+  const [aircraftId, setAircraftId] = useState('');
+  const [following, setFollowing] = useState(false);
+  const [flightFocus, setFlightFocus] = useState<{ latitude: number; longitude: number; revision: number }>();
+  const [flightSearch, setFlightSearch] = useState('');
+  const [flightKind, setFlightKind] = useState('');
+  const [flightGround, setFlightGround] = useState('');
+  const [flightAltitude, setFlightAltitude] = useState('');
+  const [flightSpeed, setFlightSpeed] = useState('');
+  const [flightDistance, setFlightDistance] = useState('');
+  const covered = !area || area.id === aviation.data?.scope?.id;
+  const flights = covered ? aviation.data?.aircraft ?? [] : [];
+  const selectedAircraft = flights.find(item => item.id === aircraftId);
+  const flightLatitude = selectedAircraft?.latitude;
+  const flightLongitude = selectedAircraft?.longitude;
+  const flightObserved = selectedAircraft?.observed;
+  useEffect(() => {
+    if (following && flightLatitude !== undefined && flightLongitude !== undefined) {
+      setFlightFocus({ latitude: flightLatitude, longitude: flightLongitude, revision: flightObserved ?? 0 });
+    }
+  }, [following, flightLatitude, flightLongitude, flightObserved]);
+  const filteredFlights = useMemo(() => flights.filter(item => mode !== 'aviation' || (
+    (item.callsign?.toLowerCase().includes(flightSearch.trim().toLowerCase()) ||
+      item.id.includes(flightSearch.trim().toLowerCase())) &&
+    (!flightKind || aircraftKind(item) === flightKind) &&
+    (!flightGround || item.ground === (flightGround === 'ground')) &&
+    (!flightAltitude || (item.altitude !== null && item.altitude >= Number(flightAltitude))) &&
+    (!flightSpeed || (item.speed !== null && item.speed >= Number(flightSpeed))) &&
+    (!flightDistance || (!!area && distanceKm(item, area) <= Number(flightDistance)))
+  )), [flights, mode, flightSearch, flightKind, flightGround, flightAltitude, flightSpeed, flightDistance, area]);
+  const aviationArea = mode === 'aviation' && covered && mapArea && aviation.data
+    ? { ...mapArea, radius: aviation.data.settings.radius } : mapArea;
+  function openFlight(id: string) {
+    setAircraftId(id); setSelected(''); setFollowing(false); setFlightFocus(undefined);
+  }
+  const flightStatus = aviation.isError ? 'API unavailable' : !covered ? 'Primary area coverage only'
+    : aviation.isPending ? 'Checking' : flights.length ? `${flights.length} tracked`
+    : aviation.data?.providers.find(provider => provider.state === 'no recent coverage') ? '0 aircraft reported'
+    : aviation.data?.providers.find(provider => provider.provider === aviation.data?.settings.primary_provider)?.state ?? 'Waiting';
   const traffic = useQuery({ queryKey: ['traffic-status'], refetchInterval: 15000,
     queryFn: () => api<{ state: string; last_success: string | null }>('/traffic/status') });
   const assets = useQuery({ queryKey: ['map-assets', area?.id, global],
@@ -404,6 +446,9 @@ function Dashboard({ user }: { user: User }) {
         {areas.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>
       <div className="top-spacer" />
+      <button type="button" aria-label="Open aviation mode" onClick={() => {
+        setMode('aviation'); setSelected(''); setHiddenLayers(current => current.filter(layer => layer !== 'aircraft'));
+      }}>Aviation · {flightStatus}</button>
       <span className={connectionError ? 'connection degraded' : 'connection'}>
         {connectionError ? dictionary.retry : streamState === 'connected' ? dictionary.fresh : streamState === 'retrying' ? 'Polling · reconnecting' : dictionary.checking}
       </span>
@@ -492,12 +537,15 @@ function Dashboard({ user }: { user: User }) {
         <ul>{history.data.map(entry => <li key={incidentKey(entry.event)}>
           {entry.event.title} · {date(entry.acknowledged_at)}
         </li>)}</ul>}
+      {user.role === 'admin' && aviation.data && <AviationAdmin data={aviation.data}
+        saved={() => { void cache.invalidateQueries({ queryKey: ['aviation'] }); }} />}
     </section>}
     {message && <p role="alert" className="error">{message}</p>}
     <main className="workspace">
       <section className="terrain">
         <h1 className="sr-only">{dictionary.map}</h1>
-        <OperationalMap location={mapArea} incidents={mapItems} trafficOpacity={flow && canFlow ? opacity : undefined} select={select} focus={focus}
+        <OperationalMap location={aviationArea} aircraft={hiddenLayers.includes('aircraft') ? undefined : filteredFlights}
+          aircraftSelected={aircraftId} selectAircraft={openFlight} aircraftFocus={flightFocus} incidents={mapItems} trafficOpacity={flow && canFlow ? opacity : undefined} select={item => { setAircraftId(''); setFollowing(false); setFlightFocus(undefined); select(item); }} focus={focus}
           selectedId={selectedId} reduceMotion={reduce} global={global} label={dictionary.map} />
       </section>
       <div className="map-command">
@@ -506,9 +554,9 @@ function Dashboard({ user }: { user: User }) {
           <button aria-expanded={showFeed} onClick={() => setShowFeed(!showFeed)}>Incidents · {visible.length}</button>
           <button aria-expanded={showStatus} onClick={() => setShowStatus(!showStatus)}>Source status</button>
         </>}
-        <button disabled={!area} onClick={() => { if (global) setMode('normal'); fit('area'); }}>Return to area</button>
+        <button disabled={!area} onClick={() => { if (global) setMode('normal'); setFollowing(false); setFlightFocus(undefined); fit('area'); }}>Return to area</button>
         {!mapOnly && <button disabled={!mapItems.some(item => item.latitude != null)} onClick={() => fit('events')}>Fit incidents</button>}
-        {!mapOnly && !global && area && <span>{mapArea?.radius} km radius</span>}
+        {!mapOnly && !global && area && <span>{aviationArea?.radius} km {mode === 'aviation' ? 'aviation radius' : 'radius'}</span>}
       </div>
       {!mapOnly && showLayers && <section className="panel overlay layer-menu" aria-label="Operational layers">
         <div className="panel-heading"><h2>Operational layers</h2><button onClick={() => { setHiddenLayers([]); setFlow(false); setOpacity(.75); }}>Reset</button></div>
@@ -522,11 +570,11 @@ function Dashboard({ user }: { user: User }) {
             onChange={event => setHiddenLayers(current => event.target.checked
               ? current.filter(value => !(values as readonly string[]).includes(value))
               : [...new Set([...current, ...values])])} />
-          <span>{name}</span><small>{[...items, ...registryMarkers].some(item => (values as readonly string[]).includes(item.category))
+          <span>{name}</span><small>{values[0] === 'aircraft' ? flightStatus : [...items, ...registryMarkers].some(item => (values as readonly string[]).includes(item.category))
             ? 'In view' : configured(values) ? 'Configured' : 'Not configured'}</small>
         </label>)}
       </section>}
-      {!mapOnly && showFeed && <section className="panel overlay feed">
+      {!mapOnly && showFeed && mode !== 'aviation' && <section className="panel overlay feed">
         <div className="panel-heading"><h2>{dictionary.feed}</h2><span className="count">{visible.length}</span><button onClick={() => setShowFeed(false)}>Close feed</button></div>
         <label className="filter"><span>Priority</span><select value={minimum} onChange={event => setMinimum(Number(event.target.value))}>
           <option value="0">All priorities</option><option value="2">Important and higher</option>
@@ -626,6 +674,33 @@ function Dashboard({ user }: { user: User }) {
           </>}
         </div>
       </aside>}
+      {!mapOnly && !showLayers && mode === 'aviation' && <section className="panel overlay feed aviation-feed" aria-label="Aircraft list">
+        <div className="panel-heading"><h2>Aircraft · {flightStatus}</h2></div>
+        <div className="details">
+          <label>Callsign or ICAO <input value={flightSearch} onChange={event => setFlightSearch(event.target.value)} /></label>
+          <div className="aviation-filters">
+            <label>Category <select value={flightKind} onChange={event => setFlightKind(event.target.value)}>
+              <option value="">All</option>{['airplane', 'rotorcraft', 'other', 'unknown'].map(kind =>
+                <option key={kind}>{kind}</option>)}</select></label>
+            <label>Status <select value={flightGround} onChange={event => setFlightGround(event.target.value)}>
+              <option value="">All</option><option value="ground">On ground</option><option value="airborne">Airborne</option>
+            </select></label>
+            <label>Min altitude (ft) <input type="number" value={flightAltitude} onChange={event => setFlightAltitude(event.target.value)} /></label>
+            <label>Min speed (kt) <input type="number" min="0" value={flightSpeed} onChange={event => setFlightSpeed(event.target.value)} /></label>
+            <label>Max distance (km) <input type="number" min="1" value={flightDistance} onChange={event => setFlightDistance(event.target.value)} /></label>
+          </div>
+          <AviationHealth data={aviation.data} />
+          {!filteredFlights.length && <p>{flights.length ? 'No aircraft match the filters.' : flightStatus}</p>}
+          {filteredFlights.map(item => <button key={item.id} aria-pressed={item.id === aircraftId} onClick={() => {
+            openFlight(item.id);
+            setFlightFocus({ latitude: item.latitude, longitude: item.longitude, revision: Date.now() });
+          }}>{item.callsign ?? item.id.toUpperCase()} · {item.altitude === null ? '—' : Math.round(item.altitude) + ' ft'} · {item.age}s</button>)}
+        </div>
+      </section>}
+      {selectedAircraft && <AircraftDetails item={selectedAircraft} follow={following}
+        distance={area ? distanceKm(selectedAircraft, area) : undefined}
+        centre={() => setFlightFocus({ latitude: selectedAircraft.latitude, longitude: selectedAircraft.longitude, revision: Date.now() })}
+        toggleFollow={() => setFollowing(!following)} close={() => openFlight('')} />}
       {!mapOnly && showStatus && <section className="panel overlay status-overlay">
           <div className="panel-heading"><h2>{dictionary.network}</h2></div>
           {providers.data ? <ul className="providers">{providers.data.map(provider =>

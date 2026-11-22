@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibre from 'maplibre-gl';
 import { type GeoJSONSource, type RasterTileSource, type Map as MapInstance } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { aircraftKind, type Aircraft } from './aviation';
 import type { Incident } from './types';
 import { mapStyles, offlineStyle, resourceName } from './map-provider';
 
@@ -31,13 +32,44 @@ function fitArea(map: MapInstance, area: MapArea) {
   map.fitBounds(bounds, { padding: 65, maxZoom: 15, duration: 0 });
 }
 
-export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion, focus, trafficOpacity }: {
+const aircraftShapes = {
+  airplane: 'M16 2l2 10 10 6v3l-10-3v7l4 3v2l-6-2-6 2v-2l4-3v-7l-10 3v-3l10-6z',
+  rotorcraft: 'M15 4h2v8h11v2H18l3 4v5l-4 3v4h-2v-4l-4-3v-5l3-4H4v-2h11z',
+  other: 'M16 3l12 23-12-6-12 6z',
+  unknown: 'M16 3l12 13-12 13L4 16z',
+};
+
+function addAircraftLayer(instance: MapInstance) {
+  for (const [kind, path] of Object.entries(aircraftShapes)) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 32;
+    const context = canvas.getContext('2d');
+    if (!context) continue;
+    const shape = new Path2D(path);
+    context.fillStyle = '#7ff4ff';
+    context.strokeStyle = '#071524';
+    context.lineWidth = 2.5;
+    context.stroke(shape);
+    context.fill(shape);
+    instance.addImage('aircraft-' + kind, context.getImageData(0, 0, 32, 32));
+  }
+  instance.addSource('aircraft', { type: 'geojson', data: empty, attribution: 'Aviation · <a href="https://adsb.lol">ADSB.lol</a> · <a href="https://opensky-network.org">OpenSky Network</a>' });
+  instance.addLayer({ id: 'live-aircraft', source: 'aircraft', type: 'symbol',
+    layout: { 'icon-image': ['concat', 'aircraft-', ['get', 'kind']], 'icon-size': ['case', ['get', 'selected'], 1.3, .85],
+      'icon-rotate': ['get', 'rotation'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true },
+    paint: { 'icon-opacity': ['match', ['get', 'freshness'], 'stale', .35, 'delayed', .65, 1] },
+  });
+}
+
+export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion, focus, trafficOpacity, aircraft, selectAircraft, aircraftSelected, aircraftFocus }: {
+  aircraft?: Aircraft[]; selectAircraft?: (id: string) => void; aircraftSelected?: string;
+  aircraftFocus?: { latitude: number; longitude: number; revision: number };
   location?: MapArea; incidents: Incident[]; select?: (event: Incident) => void;
   global: boolean; label: string; pick?: (point: Point) => void; selectedId?: string; reduceMotion?: boolean; focus?: { target: 'area' | 'events'; revision: number }; trafficOpacity?: number;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<MapInstance | null>(null);
-  const selection = useRef({ incidents, select, pick });
+  const selection = useRef({ incidents, select, pick, selectAircraft });
   const marker = useRef<maplibre.Marker | null>(null);
   const camera = useRef<{ center: [number, number]; zoom: number } | null>(null);
   const [styleIndex, setStyleIndex] = useState(0);
@@ -49,7 +81,7 @@ export function OperationalMap({ location, incidents, select, global, label, pic
   const [ready, setReady] = useState(false);
   const [settled, setSettled] = useState(false);
   const [failure, setFailure] = useState('');
-  useEffect(() => { selection.current = { incidents, select, pick }; }, [incidents, select, pick]);
+  useEffect(() => { selection.current = { incidents, select, pick, selectAircraft }; }, [incidents, select, pick, selectAircraft]);
 
   useEffect(() => {
     if (!element.current) return;
@@ -142,7 +174,17 @@ export function OperationalMap({ location, incidents, select, global, label, pic
           'circle-stroke-color': '#112431', 'circle-stroke-width': 2 } });
       instance.addLayer({ id: 'asset-kinds', type: 'symbol', source: 'map-assets',
         layout: { 'icon-image': ['concat', 'kind-', ['get', 'kind']], 'icon-allow-overlap': true } });
+      if (!light) {
+        addAircraftLayer(instance);
+        instance.on('click', 'live-aircraft', event => {
+          const id = event.features?.[0]?.properties?.id;
+          if (typeof id === 'string') selection.current.selectAircraft?.(id);
+        });
+        instance.on('mouseenter', 'live-aircraft', () => { instance.getCanvas().style.cursor = 'pointer'; });
+        instance.on('mouseleave', 'live-aircraft', () => { instance.getCanvas().style.cursor = ''; });
+      }
       instance.on('click', ['event-points', 'incident-lines', 'asset-points'], (event) => {
+        if (!light && instance.queryRenderedFeatures(event.point, { layers: ['live-aircraft'] }).length) return;
         const key = event.features?.[0]?.properties?.key;
         const selected = selection.current.incidents.find((item) => incidentKey(item) === key);
         if (selected) selection.current.select?.(selected);
@@ -168,6 +210,22 @@ export function OperationalMap({ location, incidents, select, global, label, pic
       map.current = null;
     };
   }, [style, light, attempt]);
+
+  useEffect(() => {
+    const source = ready ? map.current?.getSource('aircraft') as GeoJSONSource | undefined : undefined;
+    source?.setData({ type: 'FeatureCollection', features: (aircraft ?? []).map(item => ({
+      type: 'Feature', id: item.id,
+      properties: { id: item.id, kind: item.heading === null ? 'unknown' : aircraftKind(item),
+        rotation: item.heading ?? 0, freshness: item.freshness, selected: item.id === aircraftSelected },
+      geometry: { type: 'Point', coordinates: [item.longitude, item.latitude] },
+    })) });
+  }, [ready, aircraft, aircraftSelected]);
+
+  useEffect(() => {
+    if (ready && aircraftFocus) map.current?.easeTo({
+      center: [aircraftFocus.longitude, aircraftFocus.latitude], duration: reduceMotion ? 0 : 350,
+    });
+  }, [ready, aircraftFocus, reduceMotion]);
 
   useEffect(() => {
     if (!ready || !map.current) return;
