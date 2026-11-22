@@ -15,3 +15,9 @@ Public routes include health, setup status, bootstrap and login. Login sets an H
 `GET /api/v1/alerts/status` accepts `provider` and `external_id` query parameters and reports eligibility and the signed-in user's acknowledgement for a single active event. `GET /api/v1/alerts/history` returns up to 200 acknowledgements made by that user in the past 30 days, with snapshots taken at acknowledgement.
 
 `GET /api/v1/related-events` accepts `provider` and `external_id` and lists up to ten active events within 24 hours of the selected event and within 50 km of its point, or in the same warning district when both events use district coverage. The list describes proximity in space and time.
+
+## Map-based location management
+
+Location responses include `geography` and `is_primary`. A reverse lookup can leave the ISO country code unresolved, in which case `country` is null. Existing location writes can omit `geography` to preserve stored metadata.
+
+`POST /api/v1/locations/{id}/primary` sets the default area. `DELETE /api/v1/locations/{id}` deletes an area. Both require an administrator. `POST /api/v1/locations/reverse-geocode` resolves available metadata and an offline timezone for WGS84 coordinates. `POST /api/v1/locations/search` is available with a configured search provider. These lookups require an authenticated session or the active first-run token. `GET /api/v1/locations/geocoder-status` exposes provider availability flags.

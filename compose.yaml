@@ -44,6 +44,9 @@ services:
     <<: *core
     environment:
       <<: *database-environment
+      GEOCODER_SEARCH_URL: ${GEOCODER_SEARCH_URL:-}
+      GEOCODER_URL: ${GEOCODER_URL:-}
+      GEOCODER_TOKEN: ${GEOCODER_TOKEN:-}
       SETUP_TOKEN: ${SETUP_TOKEN:?Run scripts/init-env.sh}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
       SECURE_COOKIES: ${SECURE_COOKIES:-false}
@@ -78,6 +81,9 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         MAP_STYLE_URL: ${MAP_STYLE_URL:-}
+        MAP_LIGHT_STYLE_URL: ${MAP_LIGHT_STYLE_URL:-}
+        MAP_DARK_STYLE_URL: ${MAP_DARK_STYLE_URL:-}
+        MAP_FALLBACK_STYLE_URL: ${MAP_FALLBACK_STYLE_URL:-}
     restart: unless-stopped
     init: true
     security_opt: [no-new-privileges:true]

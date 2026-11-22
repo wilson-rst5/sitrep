@@ -10,7 +10,7 @@ New installations enable the two IPMA weather feeds by default. To enable them o
 
 The default origin is `http://localhost:8080`. For a separate display device, terminate HTTPS at a reverse proxy on the Docker host, proxy to port 8080, and set `PUBLIC_ORIGIN` to the exact HTTPS origin and `SECURE_COOKIES=true`. Keep the Compose port bound to loopback where the proxy is on the same host. Keep authentication enabled. Preserve the upstream host and allow streamed responses.
 
-Set `MAP_STYLE_URL` to an HTTPS MapLibre style whose licence and terms permit the intended use. Rebuild the web image after changing it. The Docker image serves a low-resolution Natural Earth basemap locally. Building the image requires access to the pinned Natural Earth release on GitHub.
+OpenFreeMap is the default basemap. See [map and location configuration](maps-and-location.md) for the fallback, build-time style overrides, HTTPS browser permissions and optional server-side geocoding. Building the image requires access to the pinned Natural Earth release on GitHub.
 
 ## Kiosk and PWA
 
@@ -34,11 +34,11 @@ For restore, use an isolated database and `pg_restore --exit-on-error` with the 
 
 ## Prebuilt images
 
-The [0.1.0 release candidate](https://github.com/wilson-rst5/sitrep/releases/tag/v0.1.0-rc.3) publishes Linux amd64 images. Add these settings to the generated `.env` on the Docker host, replacing the example origin with your HTTPS origin.
+The [0.2.0 release candidate](https://github.com/wilson-rst5/sitrep/releases/tag/v0.2.0-rc.1) publishes Linux amd64 images. Add these settings to the generated `.env` on the Docker host, replacing the example origin with your HTTPS origin.
 
 ```dotenv
-SITREP_CORE_IMAGE=ghcr.io/wilson-rst5/sitrep-core:0.1.0-rc.3
-SITREP_WEB_IMAGE=ghcr.io/wilson-rst5/sitrep-web:0.1.0-rc.3
+SITREP_CORE_IMAGE=ghcr.io/wilson-rst5/sitrep-core:0.2.0-rc.1
+SITREP_WEB_IMAGE=ghcr.io/wilson-rst5/sitrep-web:0.2.0-rc.1
 SITREP_HTTPS_ORIGIN=https://sitrep.example.org
 ```
 

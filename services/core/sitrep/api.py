@@ -10,13 +10,14 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi import APIRouter, Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from .db import engine, ready
+from .geocoding import Coordinates, Geography, resolve, search_places
 from .providers import DEFAULT_PROVIDERS, PROVIDERS, Event
 
 passwords = PasswordHasher()
@@ -36,7 +37,8 @@ class Credentials(BaseModel):
 
 class Location(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    country: str = Field(pattern=r"^[A-Z]{2}$")
+    country: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
+    geography: Geography | None = None
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     radius: int = Field(ge=1, le=2000)
@@ -107,11 +109,19 @@ def audit(conn, actor, action):
 
 
 def insert_location(conn, location):
+    conn.execute(text("SELECT pg_advisory_xact_lock(331008)"))
     return conn.execute(text("""
-        INSERT INTO locations (name,country,latitude,longitude,radius,timezone,language,units,district)
-        VALUES (:name,:country,:latitude,:longitude,:radius,:timezone,:language,:units,:district)
+        INSERT INTO locations (name,country,latitude,longitude,radius,timezone,language,units,district,geography,is_primary)
+        VALUES (:name,:country,:latitude,:longitude,:radius,:timezone,:language,:units,:district,
+                COALESCE(CAST(:geography AS jsonb), '{}'::jsonb), NOT EXISTS (SELECT 1 FROM locations))
         RETURNING id
-    """), location.model_dump()).scalar_one()
+    """), location_params(location)).scalar_one()
+
+
+def location_params(location):
+    values = location.model_dump(exclude={"geography"})
+    values["geography"] = location.geography.model_dump_json() if location.geography is not None else None
+    return values
 
 
 @api.get("/health")
@@ -180,10 +190,39 @@ def session(user=Depends(require_user)):
     return user
 
 
+def geocoder_access(sitrep_session: Annotated[str | None, Cookie(max_length=128)] = None,
+                    bootstrap: Annotated[str | None, Header(alias="X-Setup-Token", max_length=256)] = None):
+    if bootstrap and len(setup_token) >= 32 and secrets.compare_digest(setup_token.encode(), bootstrap.encode()):
+        with engine.connect() as conn:
+            if conn.execute(text("SELECT EXISTS(SELECT 1 FROM accounts)")).scalar_one():
+                raise HTTPException(403, "Setup already completed")
+    else:
+        require_user(sitrep_session)
+
+
+@api.get("/locations/geocoder-status")
+def geocoder_status():
+    return {"reverse": bool(os.getenv("GEOCODER_URL")), "search": bool(os.getenv("GEOCODER_SEARCH_URL"))}
+
+
+@api.post("/locations/reverse-geocode", dependencies=[Depends(geocoder_access)])
+def reverse_geocode(point: Coordinates):
+    return resolve(point)
+
+
+class PlaceSearch(BaseModel):
+    query: str = Field(min_length=3, max_length=120)
+
+
+@api.post("/locations/search", dependencies=[Depends(geocoder_access)])
+def location_search(place: PlaceSearch):
+    return search_places(place.query)
+
+
 @api.get("/locations")
 def locations(_user=Depends(require_user)):
     with engine.connect() as conn:
-        return [dict(row) for row in conn.execute(text("SELECT * FROM locations ORDER BY id")).mappings()]
+        return [dict(row) for row in conn.execute(text("SELECT * FROM locations ORDER BY is_primary DESC, id")).mappings()]
 
 
 @api.post("/locations", status_code=201)
@@ -199,13 +238,41 @@ def update_location(location_id: int, location: Location, user=Depends(require_a
     with engine.begin() as conn:
         identifier = conn.execute(text("""
             UPDATE locations SET name=:name, country=:country, latitude=:latitude, longitude=:longitude,
-                radius=:radius, timezone=:timezone, language=:language, units=:units, district=:district
+                radius=:radius, timezone=:timezone, language=:language, units=:units, district=:district,
+                geography=COALESCE(CAST(:geography AS jsonb), geography)
             WHERE id=:id RETURNING id
-        """), {"id": location_id, **location.model_dump()}).scalar()
+        """), {"id": location_id, **location_params(location)}).scalar()
         if identifier is None:
             raise HTTPException(404, "Monitoring area unavailable")
         audit(conn, user["username"], "location_updated")
     return {"id": identifier}
+
+
+@api.post("/locations/{location_id}/primary")
+def make_primary(location_id: int, user=Depends(require_admin)):
+    with engine.begin() as conn:
+        conn.execute(text("SELECT pg_advisory_xact_lock(331008)"))
+        values = {"id": location_id}
+        if not conn.execute(text("SELECT 1 FROM locations WHERE id=:id"), values).scalar():
+            raise HTTPException(404, "Monitoring area unavailable")
+        conn.execute(text("UPDATE locations SET is_primary=false WHERE is_primary"))
+        conn.execute(text("UPDATE locations SET is_primary=true WHERE id=:id"), values)
+        audit(conn, user["username"], "location_primary_changed")
+    return {"id": location_id}
+
+
+@api.delete("/locations/{location_id}")
+def delete_location(location_id: int, user=Depends(require_admin)):
+    with engine.begin() as conn:
+        conn.execute(text("SELECT pg_advisory_xact_lock(331008)"))
+        removed = conn.execute(text("DELETE FROM locations WHERE id=:id RETURNING is_primary"),
+                               {"id": location_id}).first()
+        if removed is None:
+            raise HTTPException(404, "Monitoring area unavailable")
+        if removed.is_primary:
+            conn.execute(text("UPDATE locations SET is_primary=true WHERE id=(SELECT min(id) FROM locations)"))
+        audit(conn, user["username"], "location_deleted")
+    return {"id": location_id}
 
 
 @api.post("/accounts", status_code=201)

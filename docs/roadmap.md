@@ -18,5 +18,9 @@
 - [x] Run application dependency and secret scans and inventory application dependency licences
 - [ ] Measure prolonged kiosk performance on the target display hardware
 - [ ] Review base-image package licences and validate deployment on the target host
+- [x] Add labeled basemaps and map failure controls
+- [x] Add the map picker, offline time zones and configurable geocoding
+- [x] Add primary-area selection and deletion
+- [x] Redesign the operations dashboard and kiosk layout
 - [x] Publish public GitHub repository
 - [x] Publish GHCR images after the release gates pass

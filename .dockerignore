@@ -8,3 +8,5 @@ apps/web/node_modules/
 !infrastructure/
 !infrastructure/proxy/
 !infrastructure/proxy/nginx.conf
+apps/web/**/.env*
+apps/web/**/.npmrc

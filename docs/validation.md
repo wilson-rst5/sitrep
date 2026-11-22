@@ -14,3 +14,9 @@ The public source is on the `main` branch of [SITREP on GitHub](https://github.c
 | Publication review | Gitleaks scans the publication files and public Git history. Environment files, local deployment overrides and private workspace data are ignored. |
 
 The automated browser test uses simulated events with live providers disabled. A separate local Compose run fetched live USGS and IPMA data, persisted both feeds, and displayed a live USGS earthquake in the authenticated dashboard. The new IPMA observation and forecast adapters also normalized live responses. Deployment on the intended production host remains open in the [roadmap](roadmap.md).
+
+## Map and location redesign
+
+The previously published web image reproduced the basemap error in Chromium. The console reported that the MapLibre worker failed to load, while the bundled Natural Earth geometry was present. The redesign bundles a worker URL explicitly and uses labeled OpenFreeMap vector styles. The browser suite exercises a real vector-tile response and intentionally blocks the primary style in a separate case to check the offline option.
+
+The setup suite uses a disposable installation and synthetic test records. It checks click and drag, input coordinates, timezone resolution, radius, save and reload, and the existing dashboard and viewer-role flows. The local validation screenshots use a test area and stay outside the tracked repository.

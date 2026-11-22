@@ -13,9 +13,9 @@ On a Docker host with Compose v2, run these commands from the repository root.
 docker compose up --build --wait
 ```
 
-Open [the dashboard](http://localhost:8080/). Use the generated `SETUP_TOKEN` in the ignored `.env` file to create the first administrator. Enter a monitoring area name, ISO country code, coordinates, radius, IANA time zone and display language. For Portuguese warnings, also enter the relevant IPMA district code. Sign in using the username and password you created.
+Open [the dashboard](http://localhost:8080/). Use the generated `SETUP_TOKEN` in the ignored `.env` file to create the first administrator. Choose a point on the interactive map, review available location details, and confirm a monitoring radius. Enter the IPMA district code if you want district warnings in the local view.
 
-Web traffic binds to the loopback interface by default. See [deployment](docs/deployment.md) for HTTPS, LAN kiosks, PWA installation, persistence and rollback. The Docker build packages a small, public-domain Natural Earth basemap. Configure a licensed MapLibre style for finer geographic detail.
+Web traffic binds to the loopback interface by default. See [deployment](docs/deployment.md) for HTTPS, LAN kiosks, PWA installation, persistence and rollback. The maps use OpenFreeMap by default, with bundled Natural Earth country boundaries available offline. See [map and location configuration](docs/maps-and-location.md) for provider setup.
 
 ## Data and architecture
 

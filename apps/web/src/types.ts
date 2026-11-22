@@ -1,5 +1,11 @@
+export type Geography = {
+  country_name?: string | null; region?: string | null; district_name?: string | null;
+  municipality?: string | null; city?: string | null; neighbourhood?: string | null;
+  postal_code?: string | null; formatted?: string | null; resolved_fields?: string[];
+};
+
 export type Location = {
-  id: number; name: string; country: string; district: string | null;
+  id: number; name: string; country: string | null; geography?: Geography; is_primary?: boolean; district: string | null;
   latitude: number; longitude: number; radius: number;
   timezone: string; language: 'en' | 'pt-PT'; units: 'metric' | 'imperial';
 };
@@ -23,11 +29,11 @@ export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
 
-export async function api<T>(path: string, body?: object): Promise<T> {
+export async function api<T>(path: string, body?: object, method = body ? 'POST' : 'GET'): Promise<T> {
   const response = await fetch('/api/v1' + path, body ? {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     signal: AbortSignal.timeout(12000),
-  } : { signal: AbortSignal.timeout(12000) });
+  } : { method, signal: AbortSignal.timeout(12000) });
   if (!response.ok) {
     const error = await response.json().catch(() => null);
     throw new ApiError(response.status, typeof error?.detail === 'string' ? error.detail :

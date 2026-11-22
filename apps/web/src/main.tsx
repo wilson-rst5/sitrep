@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OperationalMap, incidentKey } from './map';
 import { ApiError, api, type Incident, type Location, type Provider, type User } from './types';
+import { LocationPicker } from './location-picker';
 import './style.css';
 
 const client = new QueryClient({ defaultOptions: { queries: {
@@ -41,34 +42,19 @@ function Brand() {
 }
 
 function locationInput(data: FormData): Omit<Location, 'id'> {
+  const latitude = String(data.get('latitude') ?? '');
+  const longitude = String(data.get('longitude') ?? '');
+  if (data.get('lookup_pending')) throw new Error('Wait for the location lookup to finish.');
+  if (!latitude || !longitude) throw new Error('Place a pin or apply valid manual coordinates before saving.');
   return {
-    name: String(data.get('name')), country: String(data.get('country')).toUpperCase(),
-    latitude: Number(data.get('latitude')), longitude: Number(data.get('longitude')),
-    radius: Number(data.get('radius')), timezone: String(data.get('timezone')),
+    geography: JSON.parse(String(data.get('geography') || '{}')),
+    name: String(data.get('name')), country: String(data.get('country') || '').toUpperCase() || null,
+    latitude: Number(latitude), longitude: Number(longitude),
+    radius: Number(data.get('radius')), timezone: String(data.get('timezone') || 'UTC'),
     language: data.get('language') === 'pt-PT' ? 'pt-PT' : 'en',
     units: data.get('units') === 'imperial' ? 'imperial' : 'metric',
     district: String(data.get('district') || '').toUpperCase() || null,
   };
-}
-
-function LocationFields({ location }: { location?: Location }) {
-  return <div className="form-grid">
-    <label>Area name<input name="name" defaultValue={location?.name} maxLength={120} required /></label>
-    <label>Country code<input name="country" defaultValue={location?.country} pattern="[A-Za-z]{2}"
-      placeholder="ISO two-letter code" required /></label>
-    <label>Latitude<input name="latitude" defaultValue={location?.latitude} type="number" min="-90" max="90" step="any" required /></label>
-    <label>Longitude<input name="longitude" defaultValue={location?.longitude} type="number" min="-180" max="180" step="any" required /></label>
-    <label>Radius (km)<input name="radius" type="number" min="1" max="2000" defaultValue={location?.radius ?? 50} required /></label>
-    <label>Time zone<input name="timezone" defaultValue={location?.timezone ?? 'UTC'} maxLength={80} required /></label>
-    <label>Language<select name="language" defaultValue={location?.language ?? 'en'}>
-      <option value="en">English</option><option value="pt-PT">Português (Portugal)</option>
-    </select></label>
-    <label>Units<select name="units" defaultValue={location?.units ?? 'metric'}>
-      <option value="metric">Metric</option><option value="imperial">Imperial</option>
-    </select></label>
-    <label>IPMA district code (optional)<input name="district" defaultValue={location?.district ?? ''}
-      pattern="[A-Za-z]{3}" maxLength={3} /></label>
-  </div>;
 }
 
 function Entry({ setup }: { setup: boolean }) {
@@ -90,7 +76,12 @@ function Entry({ setup }: { setup: boolean }) {
         setStep(2);
       } else if (setup) {
         await api('/setup', { ...account, location: locationInput(data) });
-        await cache.invalidateQueries({ queryKey: ['setup'] });
+        try {
+          const user = await api<User>('/login', { username: account.username, password: account.password });
+          cache.setQueryData(['session'], user);
+        } finally {
+          await cache.invalidateQueries({ queryKey: ['setup'] });
+        }
       } else {
         const user = await api<User>('/login', {
           username: String(data.get('username')), password: String(data.get('password')),
@@ -102,11 +93,11 @@ function Entry({ setup }: { setup: boolean }) {
     } finally { setBusy(false); }
   }
 
-  return <main className="entry">
+  return <main className={step === 2 ? "entry entry-location" : "entry"}>
     <Brand />
     <section className="entry-card">
       <p className="eyebrow">{setup ? 'FIRST-RUN SETUP' : 'SITUATION AWARENESS PLATFORM'}</p>
-      <h1>{setup ? step === 1 ? 'Create administrator' : 'Set monitoring area' : 'Sign in'}</h1>
+      <h1>{setup ? step === 1 ? 'Create administrator' : 'Select your monitoring location' : 'Sign in'}</h1>
       <form onSubmit={submit} key={step}>
         {step === 1 ? <>
           {setup && <label>Bootstrap token<input name="token" type="password" autoComplete="off" required /></label>}
@@ -114,12 +105,11 @@ function Entry({ setup }: { setup: boolean }) {
           <label>Password<input name="password" type="password" autoComplete={setup ? 'new-password' : 'current-password'}
             minLength={12} maxLength={256} required /></label>
         </> : <>
-          <LocationFields />
-          <p className="muted">USGS earthquakes and IPMA district warnings require no API key.</p>
+          <LocationPicker bootstrap={account.token} />
         </>}
         {error && <p role="alert" className="error">{error}</p>}
-        <button className="primary-button" disabled={busy}>{setup ? step === 1 ? 'Continue' : 'Complete setup' : 'Sign in'}</button>
-        {step === 2 && <button type="button" onClick={() => setStep(1)}>Back</button>}
+        <button className="primary-button" disabled={busy}>{setup ? step === 1 ? 'Continue' : 'Confirm monitoring location' : 'Sign in'}</button>
+        {step === 2 && <button type="button" onClick={() => { if (window.confirm('Discard changes to the monitoring location?')) setStep(1); }}>Back</button>}
       </form>
     </section>
   </main>;
@@ -137,9 +127,12 @@ function Clock({ zone, language }: { zone: string; language: string }) {
 }
 
 function Dashboard({ user }: { user: User }) {
+  const [streamState, setStreamState] = useState<'connecting' | 'connected' | 'retrying'>('connecting');
   const cache = useQueryClient();
   useEffect(() => {
     const stream = new EventSource('/api/v1/stream');
+    stream.onopen = () => setStreamState('connected');
+    stream.onerror = () => setStreamState('retrying');
     const refresh = () => {
       void cache.invalidateQueries({ queryKey: ['events'] });
       void cache.invalidateQueries({ queryKey: ['alert-status'] });
@@ -159,9 +152,25 @@ function Dashboard({ user }: { user: User }) {
   const [editAreaId, setEditAreaId] = useState<number>();
   const [ruleCategory, setRuleCategory] = useState('earthquake');
   const [message, setMessage] = useState('');
+  const audio = useRef<AudioContext | null>(null);
+  const alertCount = useRef<number | undefined>(undefined);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  useEffect(() => () => { void audio.current?.close().catch(() => undefined); }, []);
+  const [utc, setUtc] = useState(localStorage.getItem('sitrep-utc') === 'true');
+  const [rotate, setRotate] = useState(localStorage.getItem('sitrep-rotate') === 'true');
+  const [reduce, setReduce] = useState(localStorage.getItem('sitrep-reduce') === 'true');
   const [kiosk, setKiosk] = useState(new URLSearchParams(location.search).get('kiosk') === '1');
+  useEffect(() => {
+    if (!kiosk || !rotate || settings) return;
+    const order: Mode[] = ['normal', 'weather', 'emergency', 'global'];
+    const timer = window.setInterval(() => {
+      setMode(current => order[(order.indexOf(current) + 1) % order.length]);
+      setSelected('');
+    }, 90000);
+    return () => clearInterval(timer);
+  }, [kiosk, rotate, settings]);
   const areas = useQuery({ queryKey: ['locations'], queryFn: () => api<Location[]>('/locations') });
-  const area = areas.data?.find(item => item.id === areaId) ?? areas.data?.[0];
+  const area = areas.data?.find(item => item.id === areaId) ?? areas.data?.find(item => item.is_primary) ?? areas.data?.[0];
   const editedArea = areas.data?.find(item => item.id === editAreaId);
   const dictionary = labels[area?.language ?? 'en'];
   const global = mode === 'global' || mode === 'news';
@@ -174,6 +183,47 @@ function Dashboard({ user }: { user: User }) {
     refetchInterval: 30000 });
   const providers = useQuery({ queryKey: ['providers'], queryFn: () => api<Provider[]>('/providers/health'),
     refetchInterval: 60000 });
+  const weather = useQuery({
+    queryKey: ['weather-summary', area?.id, area?.latitude, area?.longitude, area?.radius],
+    enabled: !!area,
+    queryFn: () => api<Incident[]>(`/events?location_id=${area?.id}&category=weather_observation&category=weather_forecast&limit=30`),
+    refetchInterval: 60000,
+  });
+  const news = useQuery({
+    queryKey: ['news-strip'], queryFn: () => api<Incident[]>('/events?category=news&limit=3'), refetchInterval: 60000,
+  });
+  const activeAlerts = useQuery({
+    queryKey: ['active-alerts'], queryFn: () => api<AlertHistory[]>('/alerts'), refetchInterval: 30000,
+  });
+  useEffect(() => {
+    const count = activeAlerts.data?.length;
+    const previous = alertCount.current;
+    alertCount.current = count;
+    const context = audio.current;
+    if (!audioEnabled || !context || context.state !== 'running' || count === undefined ||
+        previous === undefined || count <= previous) return;
+    const tone = context.createOscillator();
+    const volume = context.createGain();
+    tone.frequency.value = 660;
+    volume.gain.setValueAtTime(0.06, context.currentTime);
+    volume.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.18);
+    tone.connect(volume).connect(context.destination);
+    tone.start();
+    tone.stop(context.currentTime + 0.2);
+    tone.onended = () => { tone.disconnect(); volume.disconnect(); };
+  }, [activeAlerts.data, audioEnabled]);
+
+  async function setAlertAudio(enabled: boolean) {
+    if (!enabled) { setAudioEnabled(false); return; }
+    try {
+      audio.current ??= new AudioContext();
+      await audio.current.resume();
+      setAudioEnabled(true);
+    } catch {
+      setMessage('Audio alerts are unavailable in this browser.');
+    }
+  }
+
   const items = events.data ?? empty;
   const selected = items.find(item => incidentKey(item) === selectedId);
   const eventLookup = selected && new URLSearchParams({ provider: selected.provider, external_id: selected.external_id });
@@ -250,6 +300,18 @@ function Dashboard({ user }: { user: User }) {
     } catch (reason) { setMessage(String(reason)); }
   }
 
+  async function manageArea(action: 'primary' | 'delete') {
+    if (!editedArea || (action === 'delete' && !window.confirm(`Delete ${editedArea.name}?`))) return;
+    try {
+      const path = '/locations/' + editedArea.id;
+      if (action === 'delete') await api(path, undefined, 'DELETE');
+      else await api(path + '/primary', {});
+      await cache.invalidateQueries({ queryKey: ['locations'] });
+      if (action === 'delete') { setEditAreaId(undefined); setArea(undefined); setSelected(''); }
+      else setArea(editedArea.id);
+    } catch (reason) { setMessage(String(reason)); }
+  }
+
   async function signOut() {
     try {
       await api('/logout', {});
@@ -264,10 +326,16 @@ function Dashboard({ user }: { user: User }) {
     setKiosk(!kiosk);
   }
 
+  const online = providers.data?.filter(provider => provider.state === 'ONLINE').length;
+  const delayed = providers.data?.filter(provider => provider.state === 'DEGRADED').length;
+  const unavailable = providers.data?.filter(provider => provider.state === 'OFFLINE').length;
+  const observation = weather.data?.find(event => event.category === 'weather_observation');
+  const forecast = weather.data?.filter(event => event.category === 'weather_forecast').at(-1);
   const connectionError = events.isError || providers.isError || areas.isError;
-  return <div className={kiosk ? 'dashboard kiosk' : 'dashboard'}>
+  return <div className={['dashboard', kiosk && 'kiosk', reduce && 'reduce-motion'].filter(Boolean).join(' ')}>
     <header className="topbar">
       <Brand />
+      <span className="command-mode">{dictionary[mode]}</span>
       <label className="area-selector"><span>{dictionary.area}</span><select aria-label={dictionary.area}
         value={area?.id ?? ''} onChange={event => { setArea(Number(event.target.value)); setSelected(''); }}>
         {!area && <option value="">—</option>}
@@ -275,28 +343,55 @@ function Dashboard({ user }: { user: User }) {
       </select></label>
       <div className="top-spacer" />
       <span className={connectionError ? 'connection degraded' : 'connection'}>
-        {connectionError ? dictionary.retry : events.isSuccess && providers.isSuccess ? dictionary.fresh : dictionary.checking}
+        {connectionError ? dictionary.retry : streamState === 'connected' ? dictionary.fresh : streamState === 'retrying' ? 'Polling · reconnecting' : dictionary.checking}
       </span>
+      <span className="command-count" title={`${delayed ?? 0} delayed, ${unavailable ?? 0} unavailable`}>{online ?? '—'} sources online</span>
+      <span className="command-count">{activeAlerts.data ? (activeAlerts.data.length === 200 ? '200+' : activeAlerts.data.length) : '—'} active alerts</span>
       <div className="clock"><Clock zone={area?.timezone ?? 'UTC'} language={area?.language ?? 'en'} />
         <span>{area?.timezone ?? 'UTC'}</span></div>
+      {utc && <div className="clock"><Clock zone="UTC" language="en" /><span>UTC</span></div>}
       <button type="button" aria-pressed={kiosk} onClick={toggleKiosk}>{kiosk ? 'Exit kiosk' : 'Kiosk'}</button>
-      <button type="button" aria-expanded={settings} onClick={() => setSettings(!settings)}>{dictionary.settings}</button>
+      <button type="button" aria-expanded={settings} onClick={() => { if (!settings || window.confirm('Close settings and discard any unsaved changes?')) setSettings(!settings); }}>{dictionary.settings}</button>
     </header>
     <nav aria-label="Dashboard modes" className="modes">{modes.map(item =>
       <button key={item} type="button" aria-pressed={item === mode}
         onClick={() => { setMode(item); setSelected(''); }}>{dictionary[item]}</button>)}</nav>
     {settings && <section className="settings panel">
-      <div className="panel-heading"><h2>{dictionary.settings}</h2><button onClick={signOut}>{dictionary.signout}</button></div>
+      <div className="panel-heading"><h2>{dictionary.settings}</h2>
+        <div className="area-actions">
+          <button onClick={signOut}>{dictionary.signout}</button>
+          <button type="button" onClick={() => { if (window.confirm('Close settings and discard any unsaved changes?')) setSettings(false); }}>
+            Close settings
+          </button>
+        </div>
+      </div>
       <p>{user.username} · {user.role}</p>
+      <div className="display-options">
+        <label><input type="checkbox" checked={utc} onChange={event => {
+          setUtc(event.target.checked); localStorage.setItem('sitrep-utc', String(event.target.checked));
+        }} /> UTC clock</label>
+        <label><input type="checkbox" checked={rotate} onChange={event => {
+          setRotate(event.target.checked); localStorage.setItem('sitrep-rotate', String(event.target.checked));
+        }} /> Rotate kiosk modes</label>
+        <label><input type="checkbox" checked={reduce} onChange={event => {
+          setReduce(event.target.checked); localStorage.setItem('sitrep-reduce', String(event.target.checked));
+        }} /> Reduce motion</label>
+        <label><input type="checkbox" checked={audioEnabled}
+          onChange={event => void setAlertAudio(event.target.checked)} /> Audio for new alerts</label>
+      </div>
       {user.role === 'admin' && <>
         <form onSubmit={saveArea}>
           <h3>Monitoring areas</h3>
           <label>Area to manage<select value={editAreaId ?? ''}
-            onChange={event => setEditAreaId(event.target.value ? Number(event.target.value) : undefined)}>
+            onChange={event => { if (window.confirm('Switch editor and discard any unsaved changes?')) setEditAreaId(event.target.value ? Number(event.target.value) : undefined); }}>
             <option value="">New monitoring area</option>
             {areas.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select></label>
-          <LocationFields key={editedArea?.id ?? 'new'} location={editedArea} />
+          <LocationPicker key={editedArea?.id ?? 'new'} location={editedArea} />
+          {editedArea && <div className="area-actions">
+            <button type="button" disabled={editedArea.is_primary} onClick={() => void manageArea('primary')}>Make primary</button>
+            <button type="button" onClick={() => void manageArea('delete')}>Delete monitoring area</button>
+          </div>}
           <button className="primary-button">{editedArea ? 'Save monitoring area' : 'Add monitoring area'}</button>
         </form>
         <form onSubmit={createViewer}>
@@ -348,18 +443,29 @@ function Dashboard({ user }: { user: User }) {
           <ul className="event-list">{items.map(item => <li key={incidentKey(item)}>
             <button onClick={() => select(item)} aria-pressed={incidentKey(item) === selectedId}>
               <span className={'priority level-' + item.severity}>{severity[item.severity]}</span>
-              <strong>{item.title}</strong><span>{item.provider} · {item.forecast_date ?? date(item.occurred_at)}</span>
+              <strong>{item.title}</strong>
+              <span>{item.district ?? (item.latitude !== null && item.longitude !== null
+                ? `${item.latitude.toFixed(2)}°, ${item.longitude.toFixed(2)}°` : '—')} · {item.official ? 'Official source' : 'Reported'}</span>
+              <span>{item.provider} · {item.forecast_date ?? date(item.occurred_at)}</span>
             </button></li>)}</ul>}
       </section>
       <section className="panel terrain">
         <div className="panel-heading"><h1>{dictionary.map}</h1><label className="layer"><input
           type="checkbox" checked={layer} onChange={event => setLayer(event.target.checked)} /> Event markers</label></div>
-        <OperationalMap location={area} incidents={layer ? items : empty} select={select} global={global} label={dictionary.map} />
+        <OperationalMap location={area} incidents={layer ? items : empty} select={select} selectedId={selectedId} reduceMotion={reduce} global={global} label={dictionary.map} />
         <div className="map-info"><span>{global ? dictionary.global : area ?
           area.latitude.toFixed(3) + '°, ' + area.longitude.toFixed(3) + '°' : '—'}</span>
           <span>{!global && area && (area.units === 'metric' ? area.radius + ' km' : (area.radius * 0.621371).toFixed(1) + ' mi')}</span></div>
       </section>
       <aside className="side">
+        <section className="panel weather-intelligence">
+          <div className="panel-heading"><h2>Weather intelligence</h2></div>
+          <div className="details">
+            {observation ? <p>{observation.description || observation.title} · {date(observation.occurred_at)}</p> :
+              <p>{weather.isError ? 'Weather feed unavailable' : 'No station reading in this area'}</p>}
+            {forecast && <p>{forecast.forecast_date} · {forecast.description}</p>}
+          </div>
+        </section>
         <section className="panel summary">
           <div className="panel-heading"><h2>{dictionary.warning}</h2></div>
           <strong>{events.data ? items.filter(event => event.category === 'weather_warning' &&
@@ -397,16 +503,33 @@ function Dashboard({ user }: { user: User }) {
         </section>
       </aside>
     </main>
+    <div className="intelligence-strip" aria-label="Latest headlines">
+      <strong>HEADLINES</strong>
+      {news.data?.map(item => <a key={incidentKey(item)} href={item.source_url} target="_blank" rel="noreferrer">{item.title}</a>)}
+      {news.isError && <span>News unavailable</span>}
+      {news.data?.length === 0 && <span>No recent headlines</span>}
+    </div>
     <footer><span>Civilian monitoring · Consult official channels for emergency instructions</span>
       <span>{events.dataUpdatedAt > 0 && 'Dashboard refreshed · ' + date(new Date(events.dataUpdatedAt).toISOString())}</span></footer>
   </div>;
+}
+
+class DashboardBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed ? <main className="entry">
+      <h1>Dashboard could not render</h1>
+      <button onClick={() => this.setState({ failed: false })}>Retry dashboard</button>
+    </main> : this.props.children;
+  }
 }
 
 function App() {
   const setup = useQuery({ queryKey: ['setup'], queryFn: () => api<{ required: boolean }>('/setup') });
   const user = useQuery({ queryKey: ['session'], queryFn: () => api<User>('/session'), enabled: setup.data?.required === false });
   if (setup.data?.required) return <Entry setup />;
-  if (user.data) return <Dashboard user={user.data} />;
+  if (user.data) return <DashboardBoundary><Dashboard user={user.data} /></DashboardBoundary>;
   if (user.error instanceof ApiError && user.error.status === 401) return <Entry setup={false} />;
   return <main className="entry"><Brand /><p role="status">{setup.isError || user.isError
     ? 'SITREP is temporarily unavailable.' : 'Connecting to SITREP…'}</p>

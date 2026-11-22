@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0-rc.1
+
+- Added labeled OpenFreeMap basemaps and a bundled MapLibre worker.
+- Added map-based setup and area management with draggable pins, radius previews, offline time zones and configurable address lookup.
+- Added the map-centered operations layout, weather intelligence, headlines and kiosk display options.
+
 ## 0.1.0-rc.3
 
 - Added a News view with NOAA headlines and original article links.
