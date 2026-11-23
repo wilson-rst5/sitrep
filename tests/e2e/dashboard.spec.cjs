@@ -56,7 +56,12 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await page.getByText('Place details and preferences', { exact: true }).click();
   await expect(page.getByLabel(/Time zone/)).toHaveValue('America/Los_Angeles');
   await page.getByLabel('Area name').fill('Test area');
+  const signedInDuringSetup = page.waitForResponse(response =>
+    response.url().endsWith('/api/v1/login') && response.request().method() === 'POST' && response.ok());
   await page.getByRole('button', { name: 'Confirm monitoring location' }).click();
+  await signedInDuringSetup;
+  await expect.poll(async () => (await page.context().cookies()).some(cookie => cookie.name === 'sitrep_session')).toBe(true);
+  await page.reload();
   await expect(page.getByRole('heading', { name: 'Operational map' })).toBeVisible();
   const operationsMap = page.getByRole('region', { name: 'Operational map' });
   await expect(operationsMap.getByText(/OpenStreetMap/)).toBeVisible({ timeout: 25000 });
