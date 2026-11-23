@@ -19,8 +19,8 @@ with engine.connect() as connection:
         save(connection, {item["mmsi"]: item}, "receiving positions", {"valid_positions": 1})
 
     write(report("ShipStaticData", Name="AIS TEST VESSEL", Destination="TEST ONLY"))
-    write(report("StandardClassBPositionReport", Latitude=47.21, Longitude=-123.18, Sog=4, Cog=93))
-    write(report("StandardClassBPositionReport", Latitude=47.21, Longitude=-123.18, Sog=5, Cog=93))
+    write(report("StandardClassBPositionReport", Latitude=47.34, Longitude=-123.38, Sog=4, Cog=93))
+    write(report("StandardClassBPositionReport", Latitude=47.34, Longitude=-123.38, Sog=5, Cog=93))
     with connection.begin():
         raw = connection.execute(text("SELECT payload FROM vessels WHERE mmsi='123456789'")).scalar_one()
         assert raw["speed"] == 5 and raw["name"] == "AIS TEST VESSEL" and raw["destination"] == "TEST ONLY"
