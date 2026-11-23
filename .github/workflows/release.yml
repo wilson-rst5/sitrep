@@ -29,7 +29,7 @@ jobs:
           build_image() {
             image="$1"
             shift
-            docker build \
+            docker build --build-arg "SITREP_VERSION=$version" --build-arg "SITREP_BUILD_SHA=$GITHUB_SHA" \
               --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
               --label "org.opencontainers.image.revision=$GITHUB_SHA" \
               --label "org.opencontainers.image.version=$version" \

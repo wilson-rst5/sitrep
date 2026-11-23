@@ -5,6 +5,9 @@ RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
 FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ARG SITREP_VERSION=development
+ARG SITREP_BUILD_SHA=local
+ENV SITREP_VERSION=$SITREP_VERSION SITREP_BUILD_SHA=$SITREP_BUILD_SHA
 WORKDIR /app
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir --no-index /wheels/* && rm -rf /wheels
