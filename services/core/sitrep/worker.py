@@ -13,6 +13,7 @@ from nats.js.errors import NotFoundError
 from sqlalchemy import text
 
 from .aviation import collect_aviation
+from .maritime import collect_maritime
 from .db import engine
 from .providers import DEFAULT_PROVIDERS, PROVIDERS, Event
 from .traffic import traffic_providers
@@ -160,7 +161,7 @@ async def main(role):
                         if provider.configured and (provider.id in enabled or
                             (provider.request_headers and os.getenv(provider.credentials))) and
                         (not provider.request_headers or os.getenv(provider.credentials))]
-                await asyncio.gather(collect_aviation(client), *jobs)
+                await asyncio.gather(collect_aviation(client), collect_maritime(), *jobs)
         elif role == "consumer":
             await asyncio.gather(consume(js), cleanup())
         else:

@@ -24,6 +24,7 @@ from .traffic import traffic_providers
 from .firms import firms_provider
 from .flow import fetch_tile, flow_status, segment_snapshot
 from .map_assets import MapAsset, asset_view
+from .maritime import snapshot as maritime_snapshot
 
 passwords = PasswordHasher()
 cookie_secure = os.getenv("SECURE_COOKIES", "true") == "true"
@@ -631,6 +632,45 @@ def save_aviation_settings(config: AviationSettings, _user=Depends(require_admin
         """), config.model_dump())
         conn.execute(text("UPDATE event_revisions SET version=version+1 WHERE id=1"))
     return config
+
+
+class MaritimeSettings(BaseModel):
+    radius: int = Field(ge=25, le=450)
+    bounds: tuple[float, float, float, float] | None = None
+
+    @field_validator("bounds")
+    @classmethod
+    def bounded_area(cls, bounds):
+        if bounds is not None:
+            south, west, north, east = bounds
+            if not (-90 <= south < north <= 90 and -180 <= west < east <= 180
+                    and north - south <= 10 and east - west <= 20):
+                raise ValueError("Invalid or oversized geographic bounds")
+        return bounds
+
+
+@api.get("/maritime/vessels")
+def vessels(location_id: int | None = None, _user=Depends(require_user)):
+    with engine.connect() as conn:
+        return maritime_snapshot(conn, location_id)
+
+
+@api.patch("/maritime/settings")
+def save_maritime_settings(config: MaritimeSettings, _user=Depends(require_admin)):
+    import json
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE maritime_settings SET radius=:radius,bounds=CAST(:bounds AS jsonb) WHERE id=1
+        """), {"radius": config.radius, "bounds": json.dumps(config.bounds) if config.bounds else None})
+    return config
+
+
+@api.get("/version")
+def build_version():
+    return dict(version=os.getenv("SITREP_VERSION", "development"),
+                commit=os.getenv("SITREP_BUILD_SHA", "local"),
+                deployed_at=os.getenv("SITREP_DEPLOYED_AT", "unknown"))
 
 
 app.include_router(api)
