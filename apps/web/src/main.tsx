@@ -7,6 +7,7 @@ import { LocationPicker } from './location-picker';
 import { layers, operationalCategories, distanceKm } from './layers';
 import { AssetEditor, CameraView } from './assets';
 import { AircraftDetails, AviationAdmin, AviationHealth, aircraftKind, type Aviation } from './aviation';
+import { filterVessel, MaritimeSettings, VesselDetails, VesselList, type Maritime } from './maritime';
 import './style.css';
 
 const client = new QueryClient({ defaultOptions: { queries: {
@@ -35,7 +36,7 @@ const categories = {
   emergency: ['earthquake', 'weather_warning', 'wildfire', 'natural_incident'],
   aviation: ['aircraft'], maritime: ['vessel'], news: ['news'],
 };
-const unsupported = new Set<Mode>(['maritime', 'traffic']);
+const unsupported = new Set<Mode>(['traffic']);
 const severity = ['Information', 'Routine', 'Important', 'High', 'Critical'];
 const empty: Incident[] = [];
 type AlertRule = { category: string; minimum_severity: number };
@@ -140,6 +141,7 @@ function Dashboard({ user }: { user: User }) {
     const refresh = () => {
       void cache.invalidateQueries({ queryKey: ['events'] });
       void cache.invalidateQueries({ queryKey: ['aviation'] });
+      void cache.invalidateQueries({ queryKey: ['maritime'] });
       void cache.invalidateQueries({ queryKey: ['alert-status'] });
       void cache.invalidateQueries({ queryKey: ['related-events'] });
     };
@@ -175,7 +177,7 @@ function Dashboard({ user }: { user: User }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [providerFilter, setProviderFilter] = useState('');
   const [freshness, setFreshness] = useState(0);
-  const [focus, setFocus] = useState<{ target: 'area' | 'events'; revision: number }>();
+  const [focus, setFocus] = useState<{ target: 'area' | 'events' | 'vessels' | 'aircraft'; revision: number }>();
   useEffect(() => { localStorage.setItem('sitrep-hidden-layers', JSON.stringify(hiddenLayers)); }, [hiddenLayers]);
   const [selectedId, setSelected] = useState('');
   const [settings, setSettings] = useState(false);
@@ -215,6 +217,12 @@ function Dashboard({ user }: { user: User }) {
   const events = useQuery({ queryKey: ['events', query.toString()], enabled: !!area || global,
     queryFn: () => api<Incident[]>('/events?' + query),
     refetchInterval: 30000 });
+  const trackMode = mode === 'maritime' || mode === 'aviation';
+  const mapQuery = new URLSearchParams(query);
+  mapQuery.delete('category');
+  for (const category of operationalCategories) mapQuery.append('category', category);
+  const mapEvents = useQuery({ queryKey: ['events', mapQuery.toString()], enabled: !!area && trackMode,
+    queryFn: () => api<Incident[]>('/events?' + mapQuery), refetchInterval: 30000 });
   const providers = useQuery({ queryKey: ['providers'], queryFn: () => api<Provider[]>('/providers/health'),
     refetchInterval: 60000 });
   const weather = useQuery({
@@ -298,6 +306,41 @@ function Dashboard({ user }: { user: User }) {
     : aviation.isPending ? 'Checking' : flights.length ? `${flights.length} tracked`
     : aviation.data?.providers.find(provider => provider.state === 'no recent coverage') ? '0 aircraft reported'
     : aviation.data?.providers.find(provider => provider.provider === aviation.data?.settings.primary_provider)?.state ?? 'Waiting';
+  const maritime = useQuery({ queryKey: ['maritime', area?.id], refetchInterval: 15000,
+    queryFn: () => api<Maritime>('/maritime/vessels' + (area ? '?location_id=' + area.id : '')) });
+  const build = useQuery({ queryKey: ['build'], queryFn: () => api<{ version: string; commit: string; deployed_at: string }>('/version') });
+  const [vesselId, setVesselId] = useState('');
+  const [vesselList, setVesselList] = useState(false);
+  const [vesselFollow, setVesselFollow] = useState(false);
+  const [vesselFocus, setVesselFocus] = useState<{ latitude: number; longitude: number; revision: number }>();
+  const [vesselFilters, setVesselFilters] = useState(['', '', '']);
+  const vessels = maritime.data?.vessels ?? [];
+  const visibleVessels = mode === 'maritime' ? vessels.filter(item =>
+    filterVessel(item, vesselFilters[0], vesselFilters[1], vesselFilters[2], area)) : vessels;
+  const chosenVessel = vessels.find(item => item.mmsi === vesselId);
+  const vesselLat = chosenVessel?.latitude, vesselLon = chosenVessel?.longitude, vesselObserved = chosenVessel?.observed;
+  const freshVessels = vessels.filter(item => item.freshness === 'fresh').length;
+  const vesselStatus = maritime.isError ? 'API unavailable' : freshVessels ? `${freshVessels} fresh`
+    : maritime.data?.state === 'receiving positions' ? 'No fresh vessels reported' : maritime.data?.state ?? 'Checking';
+  useEffect(() => {
+    if (vesselFollow && vesselLat !== undefined && vesselLon !== undefined) {
+      setVesselFocus({ latitude: vesselLat, longitude: vesselLon, revision: vesselObserved ?? 0 });
+    }
+  }, [vesselFollow, vesselLat, vesselLon, vesselObserved]);
+  function selectVessel(id: string, centre = false) {
+    setVesselId(id); setVesselFollow(false); openFlight('');
+    if (id) setSelected('');
+    const item = centre ? vessels.find(vessel => vessel.mmsi === id) : undefined;
+    setVesselFocus(item ? { latitude: item.latitude, longitude: item.longitude, revision: Date.now() } : undefined);
+  }
+  function changeMode(next: Mode) {
+    setMode(next); setSelected(''); selectVessel('');
+    setVesselFilters(['', '', '']);
+    if (next === 'maritime') {
+      setVesselList(true);
+      setHiddenLayers(current => current.filter(layer => layer !== 'vessel'));
+    }
+  }
   const traffic = useQuery({ queryKey: ['traffic-status'], refetchInterval: 15000,
     queryFn: () => api<{ state: string; last_success: string | null }>('/traffic/status') });
   const assets = useQuery({ queryKey: ['map-assets', area?.id, global],
@@ -318,9 +361,9 @@ function Dashboard({ user }: { user: User }) {
     !['DISABLED', 'NEEDS_KEY'].includes(source.state) && (values.includes(source.category) ||
       (source.category === 'traffic' && values.some(value => value.startsWith('road_') && value !== 'road_watch')) ||
       (source.id === 'nasa-eonet' && values.includes('wildfire'))));
-  const fit = (target: 'area' | 'events') => setFocus(previous => ({ target, revision: (previous?.revision ?? 0) + 1 }));
-  const mapItems = useMemo(() => [...visible.filter(item => !['weather_observation', 'weather_forecast'].includes(item.category)),
-    ...registryMarkers.filter(item => !hiddenLayers.includes(item.category))], [visible, registryMarkers, hiddenLayers]);
+  const fit = (target: 'area' | 'events' | 'vessels' | 'aircraft') => setFocus(previous => ({ target, revision: (previous?.revision ?? 0) + 1 }));
+  const mapItems = useMemo(() => [...(trackMode ? (mapEvents.data ?? empty).filter(item => !hiddenLayers.includes(item.category)) : visible).filter(item => !['weather_observation', 'weather_forecast'].includes(item.category)),
+    ...registryMarkers.filter(item => !hiddenLayers.includes(item.category))], [visible, registryMarkers, hiddenLayers, trackMode, mapEvents.data]);
   const selectedAsset = assets.data?.find(asset => 'map-registry:' + asset.id === selectedId);
   const segment = useQuery({
     queryKey: ['segment', selectedAsset?.id], enabled: !!selectedAsset && selectedAsset.kind !== 'camera',
@@ -328,7 +371,7 @@ function Dashboard({ user }: { user: User }) {
       currentTravelTime: number | null; freeFlowTravelTime: number | null; confidence: number | null;
       checked_at: string } | null>(`/map-assets/${selectedAsset?.id}/traffic`), refetchInterval: 60000,
   });
-  const selected = items.find(item => incidentKey(item) === selectedId);
+  const selected = (trackMode ? mapItems : items).find(item => item.provider !== 'map-registry' && incidentKey(item) === selectedId);
   const eventLookup = selected && new URLSearchParams({ provider: selected.provider, external_id: selected.external_id });
   const alertStatus = useQuery({
     queryKey: ['alert-status', eventLookup?.toString()],
@@ -437,33 +480,23 @@ function Dashboard({ user }: { user: User }) {
   const forecast = weather.data?.filter(event => event.category === 'weather_forecast').at(-1);
   const connectionError = events.isError || providers.isError || areas.isError;
   return <div className={['dashboard', kiosk && 'kiosk', reduce && 'reduce-motion'].filter(Boolean).join(' ')}>
-    <header className="topbar">
+    <header className="topbar command-header">
       <Brand />
-      <span className="command-mode">{dictionary[mode]}</span>
-      <label className="area-selector"><span>{dictionary.area}</span><select aria-label={dictionary.area}
-        value={area?.id ?? ''} onChange={event => { setArea(Number(event.target.value)); setRadiusOverride(0); setSelected(''); }}>
-        {!area && <option value="">—</option>}
-        {areas.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-      </select></label>
+      {!mapOnly && <label className="command-view"><span className="sr-only">Operational view</span>
+        <select aria-label="Operational view" value={mode} onChange={event => changeMode(event.target.value as Mode)}>
+          {modes.map(item => <option key={item} value={item}>{dictionary[item]}</option>)}
+        </select></label>}
       <div className="top-spacer" />
-      <button type="button" aria-label="Open aviation mode" onClick={() => {
-        setMode('aviation'); setSelected(''); setHiddenLayers(current => current.filter(layer => layer !== 'aircraft'));
-      }}>Aviation · {flightStatus}</button>
       <span className={connectionError ? 'connection degraded' : 'connection'}>
-        {connectionError ? dictionary.retry : streamState === 'connected' ? dictionary.fresh : streamState === 'retrying' ? 'Polling · reconnecting' : dictionary.checking}
+        {connectionError ? dictionary.retry : streamState === 'connected' ? dictionary.fresh : streamState === 'retrying' ? 'Reconnecting' : dictionary.checking}
       </span>
-      <span className="command-count" title={`${delayed ?? 0} delayed, ${unavailable ?? 0} unavailable`}>{online ?? '—'} sources online</span>
-      <span className="command-count">{activeAlerts.data ? (activeAlerts.data.length === 200 ? '200+' : activeAlerts.data.length) : '—'} active alerts</span>
-      <div className="clock"><Clock zone={area?.timezone ?? 'UTC'} language={area?.language ?? 'en'} />
-        <span>{area?.timezone ?? 'UTC'}</span></div>
+      <span className="command-count">{activeAlerts.data?.length ?? '—'} active alerts</span>
+      <div className="clock"><Clock zone={area?.timezone ?? 'UTC'} language={area?.language ?? 'en'} /><span>{area?.timezone ?? 'UTC'}</span></div>
       {utc && <div className="clock"><Clock zone="UTC" language="en" /><span>UTC</span></div>}
       <button type="button" aria-pressed={kiosk} onClick={toggleKiosk}>{kiosk ? 'Exit kiosk' : 'Kiosk'}</button>
       <button type="button" aria-pressed={mapOnly} onClick={() => setMapOnly(!mapOnly)}>{mapOnly ? 'Operations view' : 'Map only'}</button>
       <button type="button" aria-expanded={settings} onClick={() => { if (!settings || window.confirm('Close settings and discard any unsaved changes?')) setSettings(!settings); }}>{dictionary.settings}</button>
     </header>
-    {!mapOnly && <nav aria-label="Dashboard modes" className="modes">{modes.map(item =>
-      <button key={item} type="button" aria-pressed={item === mode}
-        onClick={() => { setMode(item); setSelected(''); }}>{dictionary[item]}</button>)}</nav>}
     {settings && <section className="settings panel">
       <div className="panel-heading"><h2>{dictionary.settings}</h2>
         <div className="area-actions">
@@ -537,6 +570,10 @@ function Dashboard({ user }: { user: User }) {
         <ul>{history.data.map(entry => <li key={incidentKey(entry.event)}>
           {entry.event.title} · {date(entry.acknowledged_at)}
         </li>)}</ul>}
+      <p>Website {import.meta.env.VITE_SITREP_VERSION || 'development'} · Frontend build {import.meta.env.VITE_SITREP_BUILD || 'local'}</p>
+      {build.data && <p>Backend {build.data.version} · commit {build.data.commit} · deployed {build.data.deployed_at}</p>}
+      {user.role === 'admin' && maritime.data && <MaritimeSettings data={maritime.data}
+        saved={() => { void cache.invalidateQueries({ queryKey: ['maritime'] }); }} />}
       {user.role === 'admin' && aviation.data && <AviationAdmin data={aviation.data}
         saved={() => { void cache.invalidateQueries({ queryKey: ['aviation'] }); }} />}
     </section>}
@@ -544,20 +581,42 @@ function Dashboard({ user }: { user: User }) {
     <main className="workspace">
       <section className="terrain">
         <h1 className="sr-only">{dictionary.map}</h1>
-        <OperationalMap location={aviationArea} aircraft={hiddenLayers.includes('aircraft') ? undefined : filteredFlights}
-          aircraftSelected={aircraftId} selectAircraft={openFlight} aircraftFocus={flightFocus} incidents={mapItems} trafficOpacity={flow && canFlow ? opacity : undefined} select={item => { setAircraftId(''); setFollowing(false); setFlightFocus(undefined); select(item); }} focus={focus}
+        <OperationalMap location={mode === 'maritime' && area && maritime.data && !maritime.data.settings.bounds
+          ? { ...area, radius: maritime.data.settings.radius } : aviationArea}
+          vessels={hiddenLayers.includes('vessel') ? undefined : visibleVessels} selectVessel={selectVessel}
+          vesselSelected={vesselId} vesselFocus={vesselFocus} aircraft={hiddenLayers.includes('aircraft') ? undefined : filteredFlights}
+          aircraftSelected={aircraftId} selectAircraft={id => { selectVessel(''); openFlight(id); }} aircraftFocus={flightFocus} incidents={mapItems} trafficOpacity={flow && canFlow ? opacity : undefined} select={item => { selectVessel(''); setAircraftId(''); setFollowing(false); setFlightFocus(undefined); select(item); }} focus={focus}
           selectedId={selectedId} reduceMotion={reduce} global={global} label={dictionary.map} />
       </section>
-      <div className="map-command">
-        {!mapOnly && <>
-          <button aria-expanded={showLayers} onClick={() => setShowLayers(!showLayers)}>Layers</button>
-          <button aria-expanded={showFeed} onClick={() => setShowFeed(!showFeed)}>Incidents · {visible.length}</button>
-          <button aria-expanded={showStatus} onClick={() => setShowStatus(!showStatus)}>Source status</button>
-        </>}
-        <button disabled={!area} onClick={() => { if (global) setMode('normal'); setFollowing(false); setFlightFocus(undefined); fit('area'); }}>Return to area</button>
-        {!mapOnly && <button disabled={!mapItems.some(item => item.latitude != null)} onClick={() => fit('events')}>Fit incidents</button>}
-        {!mapOnly && !global && area && <span>{aviationArea?.radius} km {mode === 'aviation' ? 'aviation radius' : 'radius'}</span>}
-      </div>
+      <section className="map-command" aria-label="Map controls">
+        {!mapOnly && <label className="area-selector"><span>{dictionary.area}</span><select aria-label={dictionary.area}
+        value={area?.id ?? ''} onChange={event => { setArea(Number(event.target.value)); setRadiusOverride(0); setSelected(''); selectVessel(''); }}>
+        {!area && <option value="">—</option>}
+        {areas.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select></label>}
+        <div className="map-tools">
+          {!mapOnly && <>
+            <button aria-expanded={showLayers} onClick={() => { setShowLayers(!showLayers); if (!showLayers) setShowFeed(false); }}>Layers</button>
+            <button aria-expanded={showFeed} onClick={() => { setShowFeed(!showFeed); setShowLayers(false); }}>Incidents · {visible.length}</button>
+          </>}
+          <button disabled={!area} onClick={() => { if (global) setMode('normal'); setFollowing(false); setVesselFollow(false); setFlightFocus(undefined); setVesselFocus(undefined); fit('area'); }}>Return to area</button>
+          {!mapOnly && <details className="map-fit"><summary>Fit</summary>
+            <button disabled={!mapItems.some(item => item.latitude != null)} onClick={() => fit('events')}>Fit incidents</button>
+            <button disabled={!visibleVessels.length} onClick={() => fit('vessels')}>Fit vessels</button>
+            <button disabled={!filteredFlights.length} onClick={() => fit('aircraft')}>Fit aircraft</button>
+          </details>}
+        </div>
+        {!mapOnly && !global && area && mode !== 'maritime' && <small>{aviationArea?.radius} km {mode === 'aviation' ? 'aviation radius' : 'operational radius'}</small>}
+      </section>
+      {!mapOnly && <section className="signal-rack" aria-label="Live conditions">
+        <button type="button" aria-label="Open aviation mode" onClick={() => { changeMode('aviation'); setHiddenLayers(current => current.filter(layer => layer !== 'aircraft')); }}>
+          <span>AVIATION</span><strong>{flightStatus}</strong></button>
+        <button type="button" aria-label="Open maritime mode" onClick={() => changeMode('maritime')}>
+          <span>MARITIME</span><strong>{vesselStatus}</strong></button>
+        <button onClick={() => changeMode('weather')} aria-label="Open weather mode"><span>WEATHER</span><strong>{observation?.title ?? 'No station reading'}</strong></button>
+        <button aria-expanded={showStatus} onClick={() => setShowStatus(!showStatus)}>
+          <span title={`${delayed ?? 0} delayed · ${unavailable ?? 0} unavailable`}>SOURCES</span><strong>{online ?? '—'} online</strong></button>
+      </section>}
       {!mapOnly && showLayers && <section className="panel overlay layer-menu" aria-label="Operational layers">
         <div className="panel-heading"><h2>Operational layers</h2><button onClick={() => { setHiddenLayers([]); setFlow(false); setOpacity(.75); }}>Reset</button></div>
         <label className="layer-option"><input type="checkbox" checked={flow && canFlow} disabled={!canFlow}
@@ -570,7 +629,7 @@ function Dashboard({ user }: { user: User }) {
             onChange={event => setHiddenLayers(current => event.target.checked
               ? current.filter(value => !(values as readonly string[]).includes(value))
               : [...new Set([...current, ...values])])} />
-          <span>{name}</span><small>{values[0] === 'aircraft' ? flightStatus : [...items, ...registryMarkers].some(item => (values as readonly string[]).includes(item.category))
+          <span>{name}</span><small>{values[0] === 'aircraft' ? flightStatus : values[0] === 'vessel' ? vesselStatus : [...items, ...registryMarkers].some(item => (values as readonly string[]).includes(item.category))
             ? 'In view' : configured(values) ? 'Configured' : 'Not configured'}</small>
         </label>)}
       </section>}
@@ -607,7 +666,7 @@ function Dashboard({ user }: { user: User }) {
               <span>{item.provider} · {item.forecast_date ?? date(item.occurred_at)}</span>
             </button></li>)}</ul>}
       </section>}
-      {!mapOnly && <aside className="overlay weather-overlay">
+      {!mapOnly && mode === 'weather' && <aside className="overlay weather-overlay">
         <section className="panel weather-intelligence">
           <div className="panel-heading"><h2>Weather intelligence</h2></div>
           <div className="details">
@@ -697,6 +756,13 @@ function Dashboard({ user }: { user: User }) {
           }}>{item.callsign ?? item.id.toUpperCase()} · {item.altitude === null ? '—' : Math.round(item.altitude) + ' ft'} · {item.age}s</button>)}
         </div>
       </section>}
+      {!mapOnly && !showLayers && mode === 'maritime' && vesselList && <VesselList
+        data={maritime.data} vessels={visibleVessels} selected={vesselId} select={id => selectVessel(id, true)}
+        close={() => { setVesselList(false); setVesselFilters(['', '', '']); }}
+        centre={() => fit('vessels')} setFilters={(...filters) => setVesselFilters(filters)} />}
+      {chosenVessel && <VesselDetails key={chosenVessel.mmsi} vessel={chosenVessel}
+        following={vesselFollow} follow={() => setVesselFollow(!vesselFollow)} close={() => selectVessel('')}
+        centre={() => setVesselFocus({ latitude: chosenVessel.latitude, longitude: chosenVessel.longitude, revision: Date.now() })} />}
       {selectedAircraft && <AircraftDetails item={selectedAircraft} follow={following}
         distance={area ? distanceKm(selectedAircraft, area) : undefined}
         centre={() => setFlightFocus({ latitude: selectedAircraft.latitude, longitude: selectedAircraft.longitude, revision: Date.now() })}

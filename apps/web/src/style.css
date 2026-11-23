@@ -227,3 +227,44 @@ footer { padding: .35rem .85rem; }
 .aircraft-fields { margin: 0; }
 .aircraft-fields dt { color: var(--muted); font-size: .75rem; }
 .aircraft-fields dd { margin: 0; }
+
+/* The canvas owns the workspace; each control group is an independent overlay. */
+.dashboard .command-header { height:48px; min-height:48px; flex:0 0 auto; padding:0 .7rem; gap:.55rem; flex-wrap:nowrap; background:#08131e; border-bottom:1px solid #263e50; }
+.command-header .brand { flex:none; }
+.command-header button, .command-header select { min-height:31px; padding:.25rem .55rem; font-size:.78rem; }
+.command-header .clock { border-left:1px solid #263e50; padding-left:.55rem; }
+.command-view select { min-width:8rem; }
+.workspace .map-command { display:grid; gap:1px; left:14px; top:14px; justify-items:start; padding:4px; border:1px solid #3a5869; background:#0a1825f5; box-shadow:0 5px 17px #0007; border-radius:5px; }
+.map-command .area-selector { display:flex; gap:.45rem; align-items:center; padding:4px; }
+.map-command .area-selector span { background:none; padding:0; text-transform:uppercase; letter-spacing:.06em; font-size:.65rem; }
+.map-command .area-selector select { flex:1; min-height:34px; min-width:0; }
+.map-tools { display:flex; gap:3px; flex-wrap:wrap; }
+.map-command > small { padding:3px 5px; color:#aebfcf; font-size:.7rem; }
+.map-fit { position:relative; }
+.map-fit summary { cursor:pointer; padding:.5rem; font-size:.82rem; }
+.map-fit[open] { z-index:2; }
+.map-fit[open] button { display:block; width:100%; }
+.workspace .layer-menu { top:127px; }
+.signal-rack { position:absolute; z-index:2; top:14px; right:55px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); width:min(312px,36%); gap:3px; background:#0a1825f5; border:1px solid #3a5869; border-radius:5px; padding:3px; box-shadow:0 5px 17px #0007; }
+.signal-rack button { text-align:left; display:grid; gap:3px; min-width:0; padding:.4rem .5rem; background:#101f2c; }
+.signal-rack span { color:#8bb9c9; letter-spacing:.09em; font-size:.63rem; }
+.signal-rack strong { font-size:.78rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workspace .weather-overlay { top:125px; display:block; }
+.maritime-feed input,.maritime-feed select { width:100%; }
+@media (max-width:720px) {
+  .dashboard .command-header { gap:.2rem; padding:0 .3rem; }
+  .command-header .command-count,.command-header button[aria-pressed]:nth-last-child(2) { display:none; }
+  .command-header .brand span { display:none; }
+  .command-view select { min-width:0; max-width:105px; }
+  .workspace .map-command { left:6px; top:7px; }
+  .map-command .area-selector span { display:none; }
+  .map-command .area-selector { padding:2px; }
+  .map-command .area-selector select { max-width:235px; }
+  .map-command > small { display:none; }
+  .signal-rack { top:96px; left:6px; right:auto; width:calc(100% - 62px); grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .signal-rack button { padding:.28rem; }
+  .signal-rack span { letter-spacing:0; font-size:.58rem; }
+  .signal-rack strong { font-size:.7rem; }
+  .workspace .layer-menu,.workspace .status-overlay,.workspace .weather-overlay { top:151px; }
+  .workspace .weather-overlay { width:min(255px,calc(100% - 64px)); }
+}

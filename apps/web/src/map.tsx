@@ -3,6 +3,7 @@ import * as maplibre from 'maplibre-gl';
 import { type GeoJSONSource, type RasterTileSource, type Map as MapInstance } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { aircraftKind, type Aircraft } from './aviation';
+import type { Vessel } from './maritime';
 import type { Incident } from './types';
 import { mapStyles, offlineStyle, resourceName } from './map-provider';
 
@@ -61,15 +62,17 @@ function addAircraftLayer(instance: MapInstance) {
   });
 }
 
-export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion, focus, trafficOpacity, aircraft, selectAircraft, aircraftSelected, aircraftFocus }: {
+export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion, focus, trafficOpacity, aircraft, selectAircraft, aircraftSelected, aircraftFocus, vessels, selectVessel, vesselSelected, vesselFocus }: {
+  vessels?: Vessel[]; selectVessel?: (id: string) => void; vesselSelected?: string;
+  vesselFocus?: { latitude: number; longitude: number; revision: number };
   aircraft?: Aircraft[]; selectAircraft?: (id: string) => void; aircraftSelected?: string;
   aircraftFocus?: { latitude: number; longitude: number; revision: number };
   location?: MapArea; incidents: Incident[]; select?: (event: Incident) => void;
-  global: boolean; label: string; pick?: (point: Point) => void; selectedId?: string; reduceMotion?: boolean; focus?: { target: 'area' | 'events'; revision: number }; trafficOpacity?: number;
+  global: boolean; label: string; pick?: (point: Point) => void; selectedId?: string; reduceMotion?: boolean; focus?: { target: 'area' | 'events' | 'vessels' | 'aircraft'; revision: number }; trafficOpacity?: number;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<MapInstance | null>(null);
-  const selection = useRef({ incidents, select, pick, selectAircraft });
+  const selection = useRef({ incidents, select, pick, selectAircraft, selectVessel });
   const marker = useRef<maplibre.Marker | null>(null);
   const camera = useRef<{ center: [number, number]; zoom: number } | null>(null);
   const [styleIndex, setStyleIndex] = useState(0);
@@ -81,7 +84,7 @@ export function OperationalMap({ location, incidents, select, global, label, pic
   const [ready, setReady] = useState(false);
   const [settled, setSettled] = useState(false);
   const [failure, setFailure] = useState('');
-  useEffect(() => { selection.current = { incidents, select, pick, selectAircraft }; }, [incidents, select, pick, selectAircraft]);
+  useEffect(() => { selection.current = { incidents, select, pick, selectAircraft, selectVessel }; }, [incidents, select, pick, selectAircraft, selectVessel]);
 
   useEffect(() => {
     if (!element.current) return;
@@ -176,6 +179,37 @@ export function OperationalMap({ location, incidents, select, global, label, pic
         layout: { 'icon-image': ['concat', 'kind-', ['get', 'kind']], 'icon-allow-overlap': true } });
       if (!light) {
         addAircraftLayer(instance);
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        const context = canvas.getContext('2d');
+        if (context) {
+          const shape = new Path2D('M16 2 25 14v12l-9 4-9-4V14z M12 19h8v-2h-8z');
+          context.strokeStyle = '#06201f'; context.lineWidth = 3;
+          context.stroke(shape); context.fillStyle = '#58e9bc'; context.fill(shape, 'evenodd');
+          instance.addImage('vessel-icon', context.getImageData(0, 0, 32, 32));
+          instance.addSource('vessels', { type: 'geojson', data: empty, cluster: true,
+            clusterMaxZoom: 8, clusterRadius: 24, attribution: 'AIS · <a href="https://aisstream.io/">AISStream.io</a>' });
+          instance.addLayer({ id: 'vessel-clusters', type: 'circle', source: 'vessels', filter: ['has', 'point_count'],
+            paint: { 'circle-radius': 13, 'circle-color': '#166d63', 'circle-stroke-color': '#58e9bc', 'circle-stroke-width': 2 } });
+          instance.addLayer({ id: 'live-vessels', type: 'symbol', source: 'vessels', filter: ['!', ['has', 'point_count']],
+            layout: { 'icon-image': 'vessel-icon', 'icon-allow-overlap': true, 'icon-rotation-alignment': 'map',
+              'icon-size': ['case', ['get', 'selected'], 1.15, .75], 'icon-rotate': ['get', 'course'] },
+            paint: { 'icon-opacity': ['case', ['get', 'fresh'], 1, .42] } });
+          instance.on('click', 'live-vessels', event => {
+            const id = event.features?.[0]?.properties?.mmsi;
+            if (typeof id === 'string') selection.current.selectVessel?.(id);
+          });
+          instance.on('click', 'vessel-clusters', async event => {
+            const id = event.features?.[0]?.properties?.cluster_id;
+            if (typeof id !== 'number') return;
+            try {
+              const zoom = await (instance.getSource('vessels') as GeoJSONSource).getClusterExpansionZoom(id);
+              if (map.current === instance) instance.easeTo({ center: event.lngLat, zoom });
+            } catch { /* A stream update can replace the cluster. */ }
+          });
+          instance.on('mouseenter', 'live-vessels', () => { instance.getCanvas().style.cursor = 'pointer'; });
+          instance.on('mouseleave', 'live-vessels', () => { instance.getCanvas().style.cursor = ''; });
+        }
         instance.on('click', 'live-aircraft', event => {
           const id = event.features?.[0]?.properties?.id;
           if (typeof id === 'string') selection.current.selectAircraft?.(id);
@@ -184,7 +218,7 @@ export function OperationalMap({ location, incidents, select, global, label, pic
         instance.on('mouseleave', 'live-aircraft', () => { instance.getCanvas().style.cursor = ''; });
       }
       instance.on('click', ['event-points', 'incident-lines', 'asset-points'], (event) => {
-        if (!light && instance.queryRenderedFeatures(event.point, { layers: ['live-aircraft'] }).length) return;
+        if (!light && instance.queryRenderedFeatures(event.point, { layers: ['live-aircraft', 'live-vessels'].filter(id => instance.getLayer(id)) }).length) return;
         const key = event.features?.[0]?.properties?.key;
         const selected = selection.current.incidents.find((item) => incidentKey(item) === key);
         if (selected) selection.current.select?.(selected);
@@ -220,6 +254,21 @@ export function OperationalMap({ location, incidents, select, global, label, pic
       geometry: { type: 'Point', coordinates: [item.longitude, item.latitude] },
     })) });
   }, [ready, aircraft, aircraftSelected]);
+
+  useEffect(() => {
+    const source = ready ? map.current?.getSource('vessels') as GeoJSONSource | undefined : undefined;
+    source?.setData({ type: 'FeatureCollection', features: (vessels ?? []).map(vessel => ({
+      type: 'Feature', id: vessel.mmsi, properties: { mmsi: vessel.mmsi,
+        course: vessel.heading ?? vessel.course ?? 0, fresh: vessel.freshness === 'fresh', selected: vessel.mmsi === vesselSelected },
+      geometry: { type: 'Point', coordinates: [vessel.longitude, vessel.latitude] },
+    })) });
+  }, [ready, vessels, vesselSelected]);
+
+  useEffect(() => {
+    if (ready && vesselFocus) map.current?.easeTo({
+      center: [vesselFocus.longitude, vesselFocus.latitude], duration: reduceMotion ? 0 : 350,
+    });
+  }, [ready, vesselFocus, reduceMotion]);
 
   useEffect(() => {
     if (ready && aircraftFocus) map.current?.easeTo({
@@ -295,6 +344,11 @@ export function OperationalMap({ location, incidents, select, global, label, pic
   useEffect(() => {
     if (!focus || !map.current || !ready) return;
     if (focus.target === 'area' && location) fitArea(map.current, location);
+    if (focus.target === 'vessels' || focus.target === 'aircraft') {
+      const bounds = new maplibre.LngLatBounds();
+      for (const item of (focus.target === 'vessels' ? vessels : aircraft) ?? []) bounds.extend([item.longitude, item.latitude]);
+      if (!bounds.isEmpty()) map.current.fitBounds(bounds, { padding: 80, maxZoom: 13, duration: 0 });
+    }
     if (focus.target === 'events') {
       const bounds = new maplibre.LngLatBounds();
       for (const event of incidents) if (event.longitude != null && event.latitude != null)
