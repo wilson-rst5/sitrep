@@ -79,7 +79,7 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await expect(ships.getByRole('button', { name: /AIS TEST VESSEL/ })).toBeVisible();
   await ships.getByRole('button', { name: /AIS TEST VESSEL/ }).click();
   await expect(page.getByRole('region', { name: 'Vessel details' }).getByText('123456789')).toBeVisible();
-  await page.getByRole('button', { name: 'Close vessel' }).click();
+  await page.getByRole('button', { name: 'Close vessel', exact: true }).click();
   await page.getByLabel('Name or MMSI').fill('nonsense');
   await expect(ships.getByText('No vessels match the filters.')).toBeVisible();
   await page.getByLabel('Operational view').selectOption('normal');
