@@ -119,6 +119,7 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await quakes.check();
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: /^Incidents ·/ }).click();
   await expect(page.getByRole('button', { name: /SIMULATED TEST WEATHER/ })).toHaveCount(0);
   const nearEvent = page.getByRole('button', { name: /SIMULATED TEST EVENT \(near\)/ });
   await expect(nearEvent).toHaveCount(1);
