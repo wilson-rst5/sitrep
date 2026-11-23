@@ -42,3 +42,5 @@ For development and contributions, see [CONTRIBUTING.md](CONTRIBUTING.md) and [t
 Original SITREP source is licensed under [Apache 2.0](LICENSE). Source data and optional map styles follow their respective providers’ terms.
 
 Live aircraft can be enabled on the operational map. See [Aviation setup, limits and attribution](docs/aviation.md).
+
+See [Maritime tracking](docs/maritime.md) for AISStream configuration and coverage. The running frontend and backend build identifiers appear in Settings.

@@ -71,6 +71,17 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Exit kiosk' })).toBeVisible();
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await expect(page.getByText('needs key')).toBeVisible();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: 'Open maritime mode' }).click();
+  const ships = page.getByRole('region', { name: 'Vessel list' });
+  await expect(ships.getByRole('button', { name: /AIS TEST VESSEL/ })).toBeVisible();
+  await ships.getByRole('button', { name: /AIS TEST VESSEL/ }).click();
+  await expect(page.getByRole('region', { name: 'Vessel details' }).getByText('123456789')).toBeVisible();
+  await page.getByRole('button', { name: 'Close vessel' }).click();
+  await page.getByLabel('Name or MMSI').fill('nonsense');
+  await expect(ships.getByText('No vessels match the filters.')).toBeVisible();
+  await page.getByLabel('Operational view').selectOption('normal');
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const observed = Date.now() / 1000;
   await page.route('**/api/v1/aviation/aircraft', route => route.fulfill({ json: {
     settings: { enabled: true, radius: 200, primary_provider: 'adsb.lol', fallback: true },
@@ -91,7 +102,7 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await page.getByRole('button', { name: 'Close aircraft' }).click();
   await page.getByLabel('Callsign or ICAO').fill('absent');
   await expect(page.getByText('No aircraft match the filters.')).toBeVisible();
-  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await page.getByLabel('Operational view').selectOption('normal');
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const quakes = page.getByRole('checkbox', { name: /Earthquakes/ });
   await quakes.uncheck();
@@ -169,20 +180,20 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Official notice' })).toHaveAttribute('href', 'https://example.org/notice');
   await page.getByRole('button', { name: 'Close detail' }).click();
   await page.getByRole('button', { name: /^Incidents ·/ }).click();
-  await page.getByRole('button', { name: 'Global' }).click();
-  await expect(page.getByRole('button', { name: 'Global' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByLabel('Operational view').selectOption('global');
+  await expect(page.getByLabel('Operational view')).toHaveValue('global');
   await expect(page.getByText('SIMULATED TEST EVENT (far)')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Weather', exact: true }).click();
+  await page.getByLabel('Operational view').selectOption('weather');
   await expect(page.getByRole('button', { name: /SIMULATED TEST WEATHER/ })).toBeVisible();
   await expect(nearEvent).toHaveCount(0);
-  await page.getByRole('button', { name: 'Emergency', exact: true }).click();
+  await page.getByLabel('Operational view').selectOption('emergency');
   await expect(page.getByRole('button', { name: /SIMULATED TEST WILDFIRE/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /SIMULATED TEST WEATHER/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'News', exact: true }).click();
+  await page.getByLabel('Operational view').selectOption('news');
   await expect(page.getByRole('button', { name: /SIMULATED TEST HEADLINE/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /SIMULATED TEST WILDFIRE/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Close feed' }).click();
-  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await page.getByLabel('Operational view').selectOption('normal');
   await page.setViewportSize({ width: 2560, height: 1440 });
   const wide = await page.locator('.terrain').boundingBox();
   expect(wide.height).toBeGreaterThan(1440 * 0.85);

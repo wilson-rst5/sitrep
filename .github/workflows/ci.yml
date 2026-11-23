@@ -51,6 +51,8 @@ jobs:
           ADSBLOL_ENABLED: 'false'
       - name: Publish isolated test fixtures through JetStream
         run: docker compose exec -T collector python - < tests/integration/publish_fixture.py
+      - name: Persist disposable AIS regression fixture
+        run: docker compose exec -T api python - < tests/integration/persist_maritime_fixture.py
       - name: Verify authenticated dashboard and mobile layout
         run: |
           set -a

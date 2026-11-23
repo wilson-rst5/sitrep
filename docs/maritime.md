@@ -1,0 +1,9 @@
+# Maritime tracking
+
+AISStream.io runs as one coordinated connection in the collector. It negotiates compression and subscribes to the primary monitoring area's bounds using latitude/longitude pairs. The operational map uses longitude/latitude GeoJSON. Administrators can change the independent maritime radius (default 100 km) or enter south, west, north, east bounding coordinates in Settings. The radius or bounds filter the reported positions, independently of other layers.
+
+Create a key in your [AISStream account](https://aisstream.io/authenticate). Set `AISSTREAM_API_KEY` in the existing private Compose environment and recreate the collector with the same deployment Compose files. Credentials stay in the collector. The Maritime view reports whether the provider is configured, connection or subscription is pending, AIS messages are arriving, or valid positions are being received. The authenticated `GET /api/v1/maritime/vessels` also reports the connection, subscription, message counters and last accepted position timestamps. Coverage gaps and quiet streams are normal possibilities.
+
+AIS speeds are in knots. True heading and course over ground are distinct. Position reports determine location and freshness. Static reports can enrich names, vessel types and destinations. The map fades positions after five minutes and removes them after 30 minutes. Received timestamps are used and labelled when the upstream message has no full observation timestamp. Positions are never extrapolated.
+
+[AISStream documents subscription limits and its best-effort service](https://aisstream.io/documentation). AISHub requires a contributing station for access, and the AIS-catcher community API requires a feeding station. A local AIS-catcher receiver or a licensed maritime API are potential additional sources. Coverage depends on the receiving network and the operator's rights to use it.

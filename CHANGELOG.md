@@ -1,5 +1,6 @@
 # Changelog
 ## Unreleased
+- Replace the dashboard navigation with a compact command bar and floating map controls. Add AISStream vessel ingestion, maritime coverage settings, and a selectable vessel layer.
 
 - Add quota-aware ADSB.lol and optional OpenSky flight tracking, an independent aviation radius and live aircraft symbols on the operational map.
 
