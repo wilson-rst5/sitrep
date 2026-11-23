@@ -169,6 +169,7 @@ function Dashboard({ user }: { user: User }) {
     localStorage.setItem('sitrep-traffic-opacity', String(opacity));
   }, [flow, opacity]);
   const [showLayers, setShowLayers] = useState(false);
+  const [basemapLight, setBasemapLight] = useState(localStorage.getItem('sitrep-light-map') === 'true');
   const [showFeed, setShowFeed] = useState(false);
   const [mapOnly, setMapOnly] = useState(false);
   const [headlines, setHeadlines] = useState(false);
@@ -581,7 +582,7 @@ function Dashboard({ user }: { user: User }) {
     <main className="workspace">
       <section className="terrain">
         <h1 className="sr-only">{dictionary.map}</h1>
-        <OperationalMap location={mode === 'maritime' && area && maritime.data && !maritime.data.settings.bounds
+        <OperationalMap basemapLight={basemapLight} location={mode === 'maritime' && area && maritime.data && !maritime.data.settings.bounds
           ? { ...area, radius: maritime.data.settings.radius } : aviationArea}
           vessels={hiddenLayers.includes('vessel') ? undefined : visibleVessels} selectVessel={selectVessel}
           vesselSelected={vesselId} vesselFocus={vesselFocus} aircraft={hiddenLayers.includes('aircraft') ? undefined : filteredFlights}
@@ -619,6 +620,9 @@ function Dashboard({ user }: { user: User }) {
       </section>}
       {!mapOnly && showLayers && <section className="panel overlay layer-menu" aria-label="Operational layers">
         <div className="panel-heading"><h2>Operational layers</h2><button onClick={() => { setHiddenLayers([]); setFlow(false); setOpacity(.75); }}>Reset</button></div>
+        <label className="layer-option"><input type="checkbox" checked={basemapLight}
+          onChange={event => { setBasemapLight(event.target.checked); localStorage.setItem('sitrep-light-map', String(event.target.checked)); }} />
+          <span>Light basemap</span></label>
         <label className="layer-option"><input type="checkbox" checked={flow && canFlow} disabled={!canFlow}
           onChange={event => setFlow(event.target.checked)} /><span>Traffic Flow</span>
           <small>{traffic.data?.state.replaceAll('_', ' ') ?? 'Checking'}{traffic.data?.last_success ? ' · ' + date(traffic.data.last_success) : ''}</small></label>

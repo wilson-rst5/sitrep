@@ -38,6 +38,8 @@ test('bootstrap, sign in, change mode and open kiosk', async ({ page }) => {
   const pin = picker.getByLabel('Monitoring pin');
   await expect(pin).toBeVisible();
   const before = await page.locator('.coordinate-readout').textContent();
+  await expect(picker).toHaveAttribute('data-map-ready', 'true');
+  await pin.hover();
   const marker = await pin.boundingBox();
   await page.mouse.move(marker.x + marker.width / 2, marker.y + marker.height / 2);
   await page.mouse.down();

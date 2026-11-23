@@ -62,7 +62,8 @@ function addAircraftLayer(instance: MapInstance) {
   });
 }
 
-export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion, focus, trafficOpacity, aircraft, selectAircraft, aircraftSelected, aircraftFocus, vessels, selectVessel, vesselSelected, vesselFocus }: {
+export function OperationalMap({ location, incidents, select, global, label, pick, selectedId, reduceMotion, focus, trafficOpacity, aircraft, selectAircraft, aircraftSelected, aircraftFocus, vessels, selectVessel, vesselSelected, vesselFocus, basemapLight = false }: {
+  basemapLight?: boolean;
   vessels?: Vessel[]; selectVessel?: (id: string) => void; vesselSelected?: string;
   vesselFocus?: { latitude: number; longitude: number; revision: number };
   aircraft?: Aircraft[]; selectAircraft?: (id: string) => void; aircraftSelected?: string;
@@ -79,8 +80,9 @@ export function OperationalMap({ location, incidents, select, global, label, pic
   const [attempt, setAttempt] = useState(0);
   const [diagnostic, setDiagnostic] = useState('');
   const light = !!pick;
-  const styles = mapStyles(light);
-  const style = styles[styleIndex];
+  const styles = mapStyles(light || basemapLight);
+  const style = styles[styleIndex] ?? styles[0];
+  const initialCoverage = useRef<string | undefined>(undefined);
   const [ready, setReady] = useState(false);
   const [settled, setSettled] = useState(false);
   const [failure, setFailure] = useState('');
@@ -95,7 +97,7 @@ export function OperationalMap({ location, incidents, select, global, label, pic
     try {
       instance = new maplibre.Map({
         container: element.current,
-        style: style === 'offline' ? offlineStyle(light) : style,
+        style: style === 'offline' ? offlineStyle(light || basemapLight) : style,
         center: camera.current?.center ?? [0, 20],
         zoom: camera.current?.zoom ?? 1.4,
         maxZoom: 18,
@@ -243,7 +245,7 @@ export function OperationalMap({ location, incidents, select, global, label, pic
       instance.remove();
       map.current = null;
     };
-  }, [style, light, attempt]);
+  }, [style, light, basemapLight, attempt]);
 
   useEffect(() => {
     const source = ready ? map.current?.getSource('aircraft') as GeoJSONSource | undefined : undefined;
@@ -303,10 +305,13 @@ export function OperationalMap({ location, incidents, select, global, label, pic
 
   useEffect(() => {
     if (!ready || !map.current) return;
+    const key = JSON.stringify([global, location?.latitude, location?.longitude, location?.radius]);
+    if (!light && key === initialCoverage.current) return;
+    initialCoverage.current = key;
     if (location && !global && (!light || map.current.getZoom() < 2 ||
         !map.current.getBounds().contains([location.longitude, location.latitude]))) {
-      fitArea(map.current, location);
-    } else if (!light) map.current.jumpTo({ center: [0, 20], zoom: 1.4 });
+      fitArea(map.current, light ? location : { ...location, radius: Math.min(location.radius, 65) });
+    } else if (!light && global) map.current.jumpTo({ center: [0, 20], zoom: 1.4 });
   }, [ready, location?.latitude, location?.longitude, location?.radius, global, light]);
 
   useEffect(() => {
