@@ -4,7 +4,7 @@ SQLAlchemy==2.0.44
 psycopg[binary]==3.2.12
 alembic==1.17.2
 httpx==0.28.1
-nats-py==2.12.0
+nats-py==2.17.0
 argon2-cffi==25.1.0
 prometheus-client==0.23.1
 timezonefinder==9.2.0
